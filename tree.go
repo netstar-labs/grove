@@ -62,22 +62,32 @@ const (
 	minParFeatures = 16
 )
 
-// arena pools flat per-node histogram buffers (each d*maxNB, one for gradients
-// one for hessians) so histogram subtraction reuses memory across the whole
-// forest instead of allocating per node. One arena is shared across all trees of
-// a fit; the recursion is single-threaded, so the free list needs no lock.
+// arena pools flat per-node histogram buffers so histogram subtraction reuses
+// memory across the whole forest instead of allocating per node. The histogram
+// is packed feature-major with a *per-feature* offset (off[f]) and bin count
+// (nb[f] = regular bins + a missing bin), so one high-cardinality feature never
+// inflates the stride for the low-cardinality ones — clears and subtractions run
+// over Σnb, not d·max(nb). One arena is shared across all trees of a fit; the
+// recursion is single-threaded, so the free list needs no lock.
 type arena struct {
-	d, maxNB, size int
-	free           [][2][]float64
+	d    int
+	off  []int // per-feature start index into the flat histogram
+	nb   []int // per-feature bin count (regular bins + missing)
+	size int   // total flat length = Σ nb
+	free [][2][]float64
 }
 
 func newArena(edges [][]float64) *arena {
-	maxNB := 1
-	for _, e := range edges {
-		maxNB = max(maxNB, len(e)+2) // +1 regular top bin, +1 missing bin
-	}
 	d := len(edges)
-	return &arena{d: d, maxNB: maxNB, size: d * maxNB}
+	off := make([]int, d)
+	nb := make([]int, d)
+	total := 0
+	for f, e := range edges {
+		off[f] = total
+		nb[f] = len(e) + 2 // regular bins (len+1) + one missing bin
+		total += nb[f]
+	}
+	return &arena{d: d, off: off, nb: nb, size: total}
 }
 
 func (a *arena) get() (hg, hh []float64) {
@@ -91,10 +101,10 @@ func (a *arena) get() (hg, hh []float64) {
 
 func (a *arena) put(hg, hh []float64) { a.free = append(a.free, [2][]float64{hg, hh}) }
 
-// builder grows one tree. A node's histogram (feature-major, flat with stride
-// maxNB) is built once; on a split it builds only the smaller child's histogram
-// and derives the larger by subtracting from the parent's — roughly halving the
-// histogram-building work.
+// builder grows one tree. A node's histogram (feature-major, packed by
+// per-feature offset) is built once; on a split it builds only the smaller
+// child's histogram and derives the larger by subtracting from the parent's —
+// roughly halving the histogram-building work.
 type builder struct {
 	bt       [][]uint8
 	edges    [][]float64
@@ -134,10 +144,10 @@ func (b *builder) leafValue(G, H float64) float64 {
 // grow adds the subtree for idx (whose histogram is hg/hh) at the given depth,
 // returns its root node index, and returns hg/hh to the arena when done with them.
 func (b *builder) grow(idx []int, depth int, hg, hh []float64) int {
-	// node totals: feature 0 occupies indices [0,maxNB); every sample lands in
+	// node totals: feature 0 occupies indices [0, nb[0]); every sample lands in
 	// one of its bins, so summing that region is the node's (G,H).
 	var G, H float64
-	for i := 0; i < b.ar.maxNB; i++ {
+	for i := 0; i < b.ar.nb[0]; i++ {
 		G += hg[i]
 		H += hh[i]
 	}
@@ -211,7 +221,7 @@ func (b *builder) grow(idx []int, depth int, hg, hh []float64) int {
 }
 
 // buildHist accumulates the (gradient, hessian) histogram of idx into hg/hh
-// (feature-major, stride maxNB), clearing them first. Large nodes on wide
+// (feature-major, packed by per-feature offset), clearing them first. Large nodes on wide
 // feature sets fan out across workers, each owning a disjoint stripe of features
 // — and therefore disjoint index ranges of hg/hh — so the fill is race-free.
 func (b *builder) buildHist(idx []int, hg, hh []float64) {
@@ -242,7 +252,7 @@ func (b *builder) buildHist(idx []int, hg, hh []float64) {
 }
 
 func (b *builder) fillFeature(f int, idx []int, hg, hh []float64) {
-	off := f * b.ar.maxNB
+	off := b.ar.off[f]
 	col := b.bt[f]
 	for _, i := range idx {
 		bin := off + int(col[i])
@@ -272,7 +282,7 @@ func (b *builder) bestSplit(hg, hh []float64, G, H float64) (bestF, bestBin int,
 		if nbReg < 2 {
 			continue
 		}
-		off := f * b.ar.maxNB
+		off := b.ar.off[f]
 		Gm, Hm := hg[off+nbReg], hh[off+nbReg] // the missing bin
 		hasMissing := Gm != 0 || Hm != 0       // no missing mass ⇒ direction is irrelevant
 		var GL, HL float64

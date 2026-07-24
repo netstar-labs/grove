@@ -66,3 +66,40 @@ func BenchmarkPredict(b *testing.B) {
 		m.PredictClass(X[i%len(X)])
 	}
 }
+
+// genMixed mixes low-cardinality (binary flags) and high-cardinality (continuous)
+// features — the shape where a uniform histogram stride wastes work and C7's
+// per-feature offsets pay off.
+func genMixed(n, seed int) ([][]float64, []float64) {
+	rng := rand.New(rand.NewSource(int64(seed)))
+	const nbin, ncont = 20, 20
+	X := make([][]float64, n)
+	y := make([]float64, n)
+	for i := range X {
+		x := make([]float64, nbin+ncont)
+		for j := 0; j < nbin; j++ {
+			if rng.Float64() < 0.5 {
+				x[j] = 1
+			}
+		}
+		for j := nbin; j < nbin+ncont; j++ {
+			x[j] = rng.Float64()
+		}
+		lbl := 0.0
+		if (x[0] == 1) != (x[nbin] > 0.5) {
+			lbl = 1
+		}
+		X[i], y[i] = x, lbl
+	}
+	return X, y
+}
+
+func BenchmarkFitMixed(b *testing.B) {
+	X, y := genMixed(5000, 300)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Fit(X, y, Params{Objective: Binary, Rounds: 60, MaxDepth: 6, LearningRate: 0.1}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
