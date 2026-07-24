@@ -14,10 +14,10 @@ train binary/multiclass models offline, score them inline anywhere Go runs.
                                                      └─▶ Importance() ─▶ feature gains
 ```
 
-The library is the core; `app/grove` is a thin CLI over CSV feature matrices
-(the shape `netstar-labs/inbox`'s `tools/train` emits). Training and inference
-share one toolchain and zero third-party deps — a model fit offline scores inline
-on any host, no Python, no native library.
+The library is the core; `app/grove` is a thin CLI over any CSV feature matrix
+(numeric columns + a categorical or numeric target). Training and inference share
+one toolchain and zero third-party deps — a model fit offline scores inline on any
+host, no Python, no native library.
 
 ## Documentation
 

@@ -14,11 +14,11 @@ one static binary, zero dependencies, train and score in the same place.** A
 model fit offline drops onto any host — including a locked-down, no-outbound box
 — and scores at the moment data arrives, with no Python and no network.
 
-**Where it fits.** grove is the model half of the `netstar-labs/inbox` detection
-pipeline: `tools/detect` extracts per-message features, `tools/train` flattens
-them to a CSV, and grove turns that into a classifier whose score can eventually
-run inline at capture — beside the existing interpretable rule score. It is
-general-purpose, though: any numeric CSV with a categorical target works.
+**Where it fits.** grove is the model stage of a detection or scoring pipeline: a
+feature extractor produces a CSV of numeric features per record, grove turns that
+into a classifier (or regressor), and the trained model scores new records inline
+— beside, or in place of, a hand-written rule score. Any numeric CSV with a
+categorical or numeric target works.
 
 **What you get.**
 - Binary (logistic) and multiclass (softmax) classification.

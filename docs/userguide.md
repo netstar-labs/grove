@@ -31,7 +31,7 @@ m2, _ := grove.Load(r)
 | `Rounds` | 100 | boosting rounds (Binary: 1 tree/round; Multiclass: `NumClass`/round) |
 | `LearningRate` | 0.1 | shrinkage per tree |
 | `MaxDepth` | 6 | max tree depth |
-| `MaxBins` | 256 | histogram bins per feature (2..256) |
+| `MaxBins` | 255 | histogram bins per feature (2..255; a `uint8` slot is reserved for missing values) |
 | `Lambda` | 1 | L2 regularization on leaf weights (0 → the default 1; pass a negative value for none) |
 | `Gamma` | 0 | minimum gain to split |
 | `MinChildWeight` | 1 | minimum summed hessian in a child |
@@ -45,9 +45,9 @@ grove.Params{Objective: grove.Binary})` is valid.
 
 ## CLI (`app/grove`)
 
-The CLI operates on CSV feature matrices with a header row — the shape
-`netstar-labs/inbox`'s `tools/train` emits. Non-feature columns are dropped with
-`-ignore`; every remaining column must be numeric.
+The CLI operates on any CSV feature matrix with a header row. Non-feature columns
+(an id, a leaky score) are dropped with `-ignore`; every remaining column must be
+numeric, and `-target` names the label column.
 
 ```sh
 # train — auto-selects binary (2 classes) or multiclass (>2)

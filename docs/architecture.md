@@ -24,8 +24,8 @@ y []float64 ──────────────────────�
 
 ## Binning (`bins.go`)
 
-Continuous features are mapped to at most `MaxBins` (≤256, so a `uint8` holds a
-bin) ordinal bins via **quantile edges** — for a high-cardinality column, split
+Continuous features are mapped to at most `MaxBins` (≤255, leaving a `uint8` slot
+for the missing bin) ordinal bins via **quantile edges** — for a high-cardinality column, split
 points chosen so each bin holds a roughly equal share of the data; a column with
 fewer than `MaxBins` distinct values simply gets one bin per value. A constant
 column collapses to one bin. Bins
@@ -97,7 +97,10 @@ smaller additional win on top.
   persistent worker pool (to cut per-node goroutine spawns) is the next lever.
 - **`float64` throughout.** Accuracy and simplicity over the memory/speed of
   `float32`.
-- **No missing-value handling.** Features are assumed present (the inbox matrix
-  has no gaps); NaN is out of scope.
+- **Missing values (NaN)** get their own bin per feature and a learned default
+  direction per split (the side that maximized gain during training), so a
+  missing feature at predict time routes deterministically. Bins are capped at
+  255 to reserve the missing slot within a `uint8`. Clean data is unaffected —
+  the missing bin is empty, so splits are identical to having no missing bin.
 - **Single-machine, in-memory.** No distribution, no out-of-core. Deliberate: the
   target is inline scoring and modest corpora, not leaderboard scale.
