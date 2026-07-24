@@ -56,7 +56,8 @@ grove train -in data.csv -target type -ignore source,rule_score -out model.json 
 # predict — emits source,predicted,probability as CSV
 grove predict -model model.json -in data.csv
 
-# eval — accuracy + actual→predicted confusion against a labelled column
+# eval — accuracy, log loss, per-class precision/recall/F1 + macro-F1, and the
+# actual→predicted confusion, against a labelled column
 grove eval -model model.json -in data.csv -target type
 
 grove version

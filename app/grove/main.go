@@ -15,6 +15,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"slices"
 	"sort"
@@ -225,24 +226,108 @@ func eval(args []string) error {
 		return fmt.Errorf("target column %q not found", *target)
 	}
 
+	classes := m.Classes
+	if len(classes) == 0 { // a model loaded without stored class names
+		seen := map[string]bool{}
+		for _, r := range rows {
+			seen[r[tCol]] = true
+		}
+		classes = slices.Sorted(maps.Keys(seen))
+	}
+
+	nC := len(classes)
+	tp, fp, fn, support := make([]int, nC), make([]int, nC), make([]int, nC), make([]int, nC)
 	correct := 0
+	var logloss float64
 	confusion := map[string]int{}
 	for _, r := range rows {
 		x, err := features(r, cols)
 		if err != nil {
 			return err
 		}
-		pred := className(m, m.PredictClass(x))
+		predIdx := m.PredictClass(x)
+		predName := className(m, predIdx)
 		actual := r[tCol]
-		if pred == actual {
+		aIdx := slices.Index(classes, actual)
+		if predName == actual {
 			correct++
 		}
-		confusion[actual+"→"+pred]++
+		confusion[actual+"→"+predName]++
+		if aIdx >= 0 {
+			support[aIdx]++
+			logloss += -math.Log(clampProb(probOfClass(m, m.Predict(x), aIdx)))
+			pIdx := slices.Index(classes, predName)
+			if pIdx == aIdx {
+				tp[aIdx]++
+			} else {
+				if pIdx >= 0 {
+					fp[pIdx]++
+				}
+				fn[aIdx]++
+			}
+		}
 	}
-	fmt.Printf("accuracy: %.4f (%d/%d)\n", float64(correct)/float64(len(rows)), correct, len(rows))
+
+	n := len(rows)
+	fmt.Printf("accuracy: %.4f (%d/%d)\n", float64(correct)/float64(n), correct, n)
+	fmt.Printf("log loss: %.4f\n", logloss/float64(n))
+	fmt.Printf("%-18s %9s %9s %9s %8s\n", "class", "precision", "recall", "f1", "support")
+	var macroF1 float64
+	for c := 0; c < nC; c++ {
+		prec := ratio(tp[c], tp[c]+fp[c])
+		rec := ratio(tp[c], tp[c]+fn[c])
+		f1 := 0.0
+		if prec+rec > 0 {
+			f1 = 2 * prec * rec / (prec + rec)
+		}
+		macroF1 += f1
+		fmt.Printf("%-18s %9.3f %9.3f %9.3f %8d\n", truncStr(classes[c], 18), prec, rec, f1, support[c])
+	}
+	if nC > 0 {
+		fmt.Printf("macro-F1: %.4f\n", macroF1/float64(nC))
+	}
 	fmt.Println("actual→predicted:")
 	for _, k := range slices.Sorted(maps.Keys(confusion)) {
 		fmt.Printf("  %-28s %d\n", k, confusion[k])
 	}
 	return nil
+}
+
+// probOfClass returns the model's probability for a given class index, handling
+// the Binary shape (Predict returns just P(class=1)).
+func probOfClass(m *grove.Model, dist []float64, idx int) float64 {
+	if m.NumClass == 1 {
+		if idx == 1 {
+			return dist[0]
+		}
+		return 1 - dist[0]
+	}
+	if idx >= 0 && idx < len(dist) {
+		return dist[idx]
+	}
+	return 0
+}
+
+func clampProb(p float64) float64 {
+	if p < 1e-15 {
+		return 1e-15
+	}
+	if p > 1 {
+		return 1
+	}
+	return p
+}
+
+func ratio(a, b int) float64 {
+	if b == 0 {
+		return 0
+	}
+	return float64(a) / float64(b)
+}
+
+func truncStr(s string, w int) string {
+	if len(s) > w {
+		return s[:w]
+	}
+	return s
 }
