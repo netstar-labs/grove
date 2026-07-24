@@ -43,16 +43,28 @@ type treeParams struct {
 // builder grows one tree over a sample-index set using precomputed bins and the
 // current gradients/hessians.
 type builder struct {
-	bt    [][]uint8   // feature-major bins
-	edges [][]float64 // per-feature thresholds (bin -> real value)
-	g, h  []float64   // per-sample gradient and hessian
-	p     treeParams
-	t     *tree
+	bt     [][]uint8   // feature-major bins
+	edges  [][]float64 // per-feature thresholds (bin -> real value)
+	g, h   []float64   // per-sample gradient and hessian
+	p      treeParams
+	t      *tree
+	hg, hh []float64 // reused per-feature histogram scratch (sized to max bins)
 }
 
-// buildTree grows a single regression tree over the given sample indices.
+// buildTree grows a single regression tree over the given sample indices. The
+// histogram scratch is allocated once and reused for every node/feature, so
+// growth does no per-split allocation.
 func buildTree(bt [][]uint8, edges [][]float64, g, h []float64, idx []int, p treeParams) tree {
-	b := &builder{bt: bt, edges: edges, g: g, h: h, p: p, t: &tree{}}
+	maxNB := 1
+	for _, e := range edges {
+		if nb := len(e) + 1; nb > maxNB {
+			maxNB = nb
+		}
+	}
+	b := &builder{
+		bt: bt, edges: edges, g: g, h: h, p: p, t: &tree{},
+		hg: make([]float64, maxNB), hh: make([]float64, maxNB),
+	}
 	b.grow(idx, 0)
 	return *b.t
 }
@@ -89,8 +101,9 @@ func (b *builder) grow(idx []int, depth int) int {
 		if nb < 2 {
 			continue
 		}
-		hg := make([]float64, nb)
-		hh := make([]float64, nb)
+		hg, hh := b.hg[:nb], b.hh[:nb]
+		clear(hg)
+		clear(hh)
 		for _, i := range idx {
 			bin := b.bt[f][i]
 			hg[bin] += b.g[i]

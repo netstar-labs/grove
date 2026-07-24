@@ -61,22 +61,67 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		lr:             p.LearningRate,
 	}
 
+	prob := make([]float64, k)
+	perm := iota0(n)
+	ks := n
+	if p.Subsample < 1 {
+		if ks = int(p.Subsample * float64(n)); ks < 1 {
+			ks = 1
+		}
+	}
+	rng := rand.New(rand.NewSource(p.Seed))
+	sample := func() []int {
+		if p.Subsample >= 1 {
+			return perm
+		}
+		return partialSample(perm, ks, rng)
+	}
+
+	// gradient/hessian scratch: one pair for binary; per-class arrays for
+	// multiclass, so a round computes softmax once per sample (O(n·k)) rather
+	// than once per (sample, class) (O(n·k²)).
 	g := make([]float64, n)
 	h := make([]float64, n)
-	prob := make([]float64, k)
-	all := iota0(n)
-	rng := rand.New(rand.NewSource(p.Seed))
+	var gc, hc [][]float64
+	if k > 1 {
+		gc = make([][]float64, k)
+		hc = make([][]float64, k)
+		for c := range gc {
+			gc[c] = make([]float64, n)
+			hc[c] = make([]float64, n)
+		}
+	}
 
 	for round := 0; round < p.Rounds; round++ {
 		trees := make([]tree, k)
-		for c := 0; c < k; c++ {
-			gradients(raw, y, c, k, prob, g, h)
-			idx := subsample(all, p.Subsample, rng) // returns all unchanged when Subsample==1
-			t := buildTree(bt, bnr.edges, g, h, idx, tp)
-			for i := 0; i < n; i++ {
-				raw[i][c] += t.predict(X[i])
+		if k == 1 {
+			for i := range raw {
+				g[i], h[i] = gradHess(sigmoid(raw[i][0]), y[i])
 			}
-			trees[c] = t
+			t := buildTree(bt, bnr.edges, g, h, sample(), tp)
+			for i := range raw {
+				raw[i][0] += t.predict(X[i])
+			}
+			trees[0] = t
+		} else {
+			for i := range raw {
+				softmax(raw[i], prob)
+				yi := int(y[i])
+				for c := 0; c < k; c++ {
+					yc := 0.0
+					if yi == c {
+						yc = 1
+					}
+					gc[c][i], hc[c][i] = gradHess(prob[c], yc)
+				}
+			}
+			for c := 0; c < k; c++ {
+				t := buildTree(bt, bnr.edges, gc[c], hc[c], sample(), tp)
+				for i := range raw {
+					raw[i][c] += t.predict(X[i])
+				}
+				trees[c] = t
+			}
 		}
 		m.Rounds = append(m.Rounds, trees)
 	}
@@ -110,23 +155,4 @@ func baseScores(y []float64, k, n int) []float64 {
 func gradHess(p, target float64) (g, h float64) {
 	const eps = 1e-6
 	return p - target, math.Max(p*(1-p), eps)
-}
-
-// gradients fills g,h with the first/second derivatives of the loss w.r.t. the
-// raw score of class c (logistic for Binary, softmax for Multiclass).
-func gradients(raw [][]float64, y []float64, c, k int, prob, g, h []float64) {
-	if k == 1 {
-		for i := range raw {
-			g[i], h[i] = gradHess(sigmoid(raw[i][0]), y[i])
-		}
-		return
-	}
-	for i := range raw {
-		softmax(raw[i], prob)
-		yc := 0.0
-		if int(y[i]) == c {
-			yc = 1
-		}
-		g[i], h[i] = gradHess(prob[c], yc)
-	}
 }

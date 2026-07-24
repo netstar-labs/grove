@@ -30,15 +30,24 @@ func (m *Model) rawScores(x []float64) []float64 {
 	return out
 }
 
+// rawBinary is the allocation-free score path for a Binary model — the common
+// case for inline scoring.
+func (m *Model) rawBinary(x []float64) float64 {
+	s := m.Base[0]
+	for _, round := range m.Rounds {
+		s += round[0].predict(x)
+	}
+	return s
+}
+
 // Predict returns calibrated probabilities: a single P(class=1) for Binary, or a
 // NumClass-length distribution for Multiclass.
 func (m *Model) Predict(x []float64) []float64 {
-	raw := m.rawScores(x)
 	if m.NumClass == 1 {
-		return []float64{sigmoid(raw[0])}
+		return []float64{sigmoid(m.rawBinary(x))}
 	}
 	out := make([]float64, m.NumClass)
-	softmax(raw, out)
+	softmax(m.rawScores(x), out)
 	return out
 }
 
@@ -46,16 +55,15 @@ func (m *Model) Predict(x []float64) []float64 {
 // single pass over the ensemble — cheaper than calling PredictClass and Predict
 // separately (each of which walks every tree).
 func (m *Model) PredictClassProba(x []float64) (int, float64) {
-	raw := m.rawScores(x)
 	if m.NumClass == 1 {
-		p := sigmoid(raw[0])
+		p := sigmoid(m.rawBinary(x))
 		if p >= 0.5 {
 			return 1, p
 		}
 		return 0, 1 - p
 	}
 	prob := make([]float64, m.NumClass)
-	softmax(raw, prob)
+	softmax(m.rawScores(x), prob)
 	best := 0
 	for c := 1; c < len(prob); c++ {
 		if prob[c] > prob[best] {
@@ -67,13 +75,13 @@ func (m *Model) PredictClassProba(x []float64) (int, float64) {
 
 // PredictClass returns the most likely class index (0/1 for Binary).
 func (m *Model) PredictClass(x []float64) int {
-	raw := m.rawScores(x)
 	if m.NumClass == 1 {
-		if sigmoid(raw[0]) >= 0.5 {
+		if m.rawBinary(x) >= 0 { // sigmoid(raw)>=0.5 ⟺ raw>=0
 			return 1
 		}
 		return 0
 	}
+	raw := m.rawScores(x)
 	best := 0
 	for c := 1; c < len(raw); c++ {
 		if raw[c] > raw[best] {

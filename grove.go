@@ -150,16 +150,15 @@ func iota0(n int) []int {
 	return s
 }
 
-// subsample returns a fresh index slice sampling frac of idx without replacement.
-func subsample(idx []int, frac float64, rng *rand.Rand) []int {
-	if frac >= 1 {
-		return idx
+// partialSample shuffles the first k entries of perm in place (partial
+// Fisher–Yates) and returns that prefix — a without-replacement sample of size
+// k drawn with no allocation. perm stays a permutation of its own elements, so
+// it can be reused across rounds.
+func partialSample(perm []int, k int, rng *rand.Rand) []int {
+	n := len(perm)
+	for i := 0; i < k; i++ {
+		j := i + rng.Intn(n-i)
+		perm[i], perm[j] = perm[j], perm[i]
 	}
-	k := int(frac * float64(len(idx)))
-	if k < 1 {
-		k = 1
-	}
-	out := append([]int(nil), idx...)
-	rng.Shuffle(len(out), func(i, j int) { out[i], out[j] = out[j], out[i] })
-	return out[:k]
+	return perm[:k]
 }
