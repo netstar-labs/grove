@@ -267,10 +267,17 @@ func (b *builder) bestSplit(hg, hh []float64, G, H float64) (bestF, bestBin int,
 		}
 		off := f * b.ar.maxNB
 		Gm, Hm := hg[off+nbReg], hh[off+nbReg] // the missing bin
+		hasMissing := Gm != 0 || Hm != 0       // no missing mass ⇒ direction is irrelevant
 		var GL, HL float64
 		for bin := 0; bin < nbReg-1; bin++ {
 			GL += hg[off+bin]
 			HL += hh[off+bin]
+			if !hasMissing {
+				if g, ok := b.gainOf(GL, HL, G, H); ok && g > bestGain {
+					bestF, bestBin, bestGain, defaultLeft = f, bin, g, true
+				}
+				continue
+			}
 			// missing left: regular-left plus the missing mass
 			if g, ok := b.gainOf(GL+Gm, HL+Hm, G, H); ok && g > bestGain {
 				bestF, bestBin, bestGain, defaultLeft = f, bin, g, true
