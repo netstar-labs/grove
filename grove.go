@@ -1,6 +1,7 @@
 // Package grove is a small, dependency-free gradient-boosted decision tree
 // library: it grows an ensemble of shallow regression trees over histogram-
-// binned features to model binary (logistic) and multiclass (softmax) targets,
+// binned features to model binary (logistic), multiclass (softmax), and
+// regression (squared-error) targets,
 // then scores new rows with a pure-Go Predict and reports which features drove
 // the fit. Training and inference share one toolchain and zero third-party deps,
 // so a model trains offline and scores inline anywhere Go runs — no Python
@@ -27,12 +28,12 @@ const (
 // Params configures a fit. The zero value is not valid; use Default and adjust,
 // or rely on Fit filling unset (zero) fields with the defaults below.
 type Params struct {
-	Objective      string  // Binary or Multiclass
+	Objective      string  // Binary, Multiclass, or Regression
 	NumClass       int     // classes for Multiclass (ignored for Binary)
 	Rounds         int     // boosting rounds (trees for Binary, Rounds×NumClass total)
 	LearningRate   float64 // shrinkage applied to each tree's leaves
 	MaxDepth       int     // maximum tree depth
-	MaxBins        int     // histogram bins per feature (2..256)
+	MaxBins        int     // histogram bins per feature (2..255; a slot is reserved for missing values)
 	Lambda         float64 // L2 regularization on leaf weights (0 uses the default; negative = none)
 	Gamma          float64 // minimum gain to make a split
 	MinChildWeight float64 // minimum summed hessian in a child

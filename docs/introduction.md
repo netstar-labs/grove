@@ -12,7 +12,7 @@ into one clean verdict.
 pure Go — no C, no Python, no third-party anything. It bins each feature into a
 handful of ranges, walks per-bin gradient histograms for the split that cuts the
 loss hardest, and does it again, round after round, shrinking every tree so the
-ensemble *converges* instead of lurching. Binary or multiclass. And the model it
+ensemble *converges* instead of lurching. Binary, multiclass, or regression. And the model it
 hands back is **just data** — a base score and a list of trees you can serialize
 to JSON, diff in a pull request, and read with your own eyes.
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # build/grove — cross-compile the grove CLI to linux/amd64 with a git-describe
 # version stamp, package a self-contained installer, and (given a host) scp it
-# over and install it. Modeled on netstar-labs/inbox/build/inbox.
+# over and install it.
 #
 #   build/grove [--cli|--server] [user@host]
 #

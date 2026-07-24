@@ -1,6 +1,6 @@
-// Command grove trains and applies gradient-boosted-tree models over CSV feature
-// matrices — the shape tools/train emits from the inbox corpus, but any numeric
-// CSV with a categorical target works. Three subcommands:
+// Command grove trains and applies gradient-boosted-tree models over any CSV
+// feature matrix (numeric columns + a categorical or numeric target). Three
+// subcommands:
 //
 //	grove train   -in data.csv -target type [-ignore source,rule_score] -out model.json
 //	grove predict -model model.json -in data.csv

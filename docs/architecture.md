@@ -64,10 +64,11 @@ stay deterministic.)
 
 The ensemble is additive. `raw[i]` holds sample `i`'s running score per class,
 seeded with a constant base (label log-odds for binary; per-class log-frequency
-for multiclass). Each round computes the loss gradient/hessian at the current
-`raw`, fits one tree per class to those gradients, and adds the tree's (shrunk)
-output back into `raw`. Logistic loss gives `g = p − y`, `h = p(1−p)`; softmax
-gives the per-class analogue. Optional row `Subsample` (seeded) adds stochastic
+for multiclass; the target mean for regression). Each round computes the loss
+gradient/hessian at the current `raw`, fits one tree per class to those
+gradients, and adds the tree's (shrunk) output back into `raw`. Logistic loss
+gives `g = p − y`, `h = p(1−p)`; softmax gives the per-class analogue; regression
+(squared error) gives `g = pred − y`, `h = 1`. Optional row `Subsample` (seeded) adds stochastic
 regularization. The whole loop is deterministic for a fixed `Seed`.
 
 ## Model + inference (`model.go`)

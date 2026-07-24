@@ -37,7 +37,7 @@ m2, _ := grove.Load(r)
 | `MinChildWeight` | 1 | minimum summed hessian in a child |
 | `Subsample` | 1 | row fraction sampled per tree |
 | `ValFraction` | 0 | rows held out for early-stopping validation (auto 0.1 when `EarlyStop` set; capped 0.5) |
-| `EarlyStop` | 0 | stop after this many rounds with no held-out log-loss improvement, then keep the best round (0 = off) |
+| `EarlyStop` | 0 | stop after this many rounds with no held-out loss improvement (log-loss, or MSE for regression), then keep the best round (0 = off) |
 | `Seed` | 1 | RNG seed (subsampling + val split); a fit is reproducible for a fixed seed |
 
 Unset (zero) fields are filled with the defaults above, so `grove.Fit(X, y,
@@ -81,7 +81,7 @@ name, so column order in the input need not match training.
 
 ## Model format
 
-A model is JSON: `objective`, `num_class`, `num_feature`, `base` (per-class
+A model is JSON: `version`, `objective`, `num_class`, `num_feature`, `base` (per-class
 scores), `learning_rate`, `rounds` (a list of rounds, each a list of trees; a
 tree is a flat `nodes` array), and optional `feature_names` / `classes`. It is
 inspectable and diffable — a retrain's changes show up in a `git diff`.

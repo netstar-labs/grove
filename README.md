@@ -1,7 +1,7 @@
 # grove
 
 A small, dependency-free **gradient-boosted decision tree** library in pure Go —
-train binary/multiclass models offline, score them inline anywhere Go runs.
+train binary/multiclass/regression models offline, score them inline anywhere Go runs.
 
 ```
   features (n×d) ─▶ quantile bins ─▶ ┌──────────── boosting rounds ────────────┐
@@ -55,7 +55,7 @@ grove eval    -model model.json -in data.csv -target type
 | [`boost.go`](boost.go) | the boosting loop (`Fit`), base scores, logistic/softmax gradients |
 | [`model.go`](model.go) | `Model`: `Predict`/`PredictClass`, `Importance`, JSON save/load |
 | [`app/grove/`](app/grove) | CLI: `train` / `predict` / `eval` over CSV |
-| [`example/`](example) | runnable demos (library embed, validation harness) |
+| [`example/`](example) | runnable demos (library embed, validation harness, model roundtrip) |
 | [`build/grove`](build/grove) | cross-compile + package the CLI |
 
 ## Notes
