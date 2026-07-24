@@ -56,6 +56,9 @@ func (m *Model) Predict(x []float64) []float64 {
 		return []float64{m.PredictValue(x)}
 	}
 	if len(x) < m.NumFeature {
+		if m.NumClass == 1 {
+			return []float64{0.5} // Binary output is P(class=1); neutral is 0.5, not 1/1
+		}
 		return neutral(m.NumClass)
 	}
 	if m.NumClass == 1 {
@@ -94,7 +97,10 @@ func neutral(k int) []float64 {
 // separately (each of which walks every tree).
 func (m *Model) PredictClassProba(x []float64) (int, float64) {
 	if len(x) < m.NumFeature {
-		return 0, 1 / float64(max(m.NumClass, 1))
+		if m.NumClass == 1 {
+			return 0, 0.5
+		}
+		return 0, 1 / float64(m.NumClass)
 	}
 	if m.NumClass == 1 {
 		p := sigmoid(m.rawBinary(x))
@@ -198,6 +204,11 @@ func Load(r io.Reader) (*Model, error) {
 func (m *Model) validate() error {
 	if m.Version > modelVersion {
 		return fmt.Errorf("grove: model version %d newer than supported %d", m.Version, modelVersion)
+	}
+	switch m.Objective {
+	case Binary, Multiclass, Regression:
+	default:
+		return fmt.Errorf("grove: unknown objective %q", m.Objective)
 	}
 	if m.NumClass < 1 {
 		return fmt.Errorf("grove: num_class %d < 1", m.NumClass)

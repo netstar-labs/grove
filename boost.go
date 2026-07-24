@@ -19,6 +19,14 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		return nil, errors.New("grove: empty dataset or len(X) != len(y)")
 	}
 	d := len(X[0])
+	if d == 0 {
+		return nil, errors.New("grove: zero-length feature vectors")
+	}
+	for i := range X {
+		if len(X[i]) != d {
+			return nil, errors.New("grove: ragged feature rows")
+		}
+	}
 
 	k := 1
 	switch p.Objective {
@@ -40,9 +48,23 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 
 	bnr := fitBinner(X, p.MaxBins)
 	bt := bnr.transpose(X)
-	base := baseScores(y, k, n)
+
+	// optional train/validation split for early stopping. Val rows never enter a
+	// tree and don't shape the base score; their running score is kept only to
+	// measure held-out loss.
+	trainIdx := iota0(n)
+	var valIdx []int
+	if p.EarlyStop > 0 && p.ValFraction > 0 && n >= 4 {
+		sp := iota0(n)
+		sr := rand.New(rand.NewSource(p.Seed ^ 0x9e3779b9))
+		sr.Shuffle(n, func(i, j int) { sp[i], sp[j] = sp[j], sp[i] })
+		nv := clampInt(int(p.ValFraction*float64(n)), 1, n-1)
+		valIdx, trainIdx = sp[:nv], sp[nv:]
+	}
+
+	base := baseScores(y, trainIdx, k)
 	if p.Objective == Regression {
-		base = []float64{meanFloat(y)} // start from the target mean
+		base = []float64{meanIdx(y, trainIdx)} // start from the training-target mean
 	}
 
 	// raw[i] holds the running per-class score for sample i (init to base).
@@ -65,18 +87,6 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		gamma:          p.Gamma,
 		minChildWeight: p.MinChildWeight,
 		lr:             p.LearningRate,
-	}
-
-	// optional train/validation split for early stopping (val rows never enter a
-	// tree; their running score is kept only to measure held-out loss).
-	trainIdx := iota0(n)
-	var valIdx []int
-	if p.EarlyStop > 0 && p.ValFraction > 0 && n >= 4 {
-		sp := iota0(n)
-		sr := rand.New(rand.NewSource(p.Seed ^ 0x9e3779b9))
-		sr.Shuffle(n, func(i, j int) { sp[i], sp[j] = sp[j], sp[i] })
-		nv := clampInt(int(p.ValFraction*float64(n)), 1, n-1)
-		valIdx, trainIdx = sp[:nv], sp[nv:]
 	}
 
 	prob := make([]float64, k)
@@ -153,7 +163,7 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		}
 		m.Rounds = append(m.Rounds, trees)
 
-		if p.EarlyStop > 0 {
+		if p.EarlyStop > 0 && len(valIdx) > 0 {
 			loss := valLoss(raw, y, valIdx, k, p.Objective)
 			if loss < bestLoss-1e-12 {
 				bestLoss, bestRound, since = loss, round, 0
@@ -167,17 +177,6 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		m.Rounds = m.Rounds[:bestRound+1]
 	}
 	return m, nil
-}
-
-func meanFloat(y []float64) float64 {
-	if len(y) == 0 {
-		return 0
-	}
-	var s float64
-	for _, v := range y {
-		s += v
-	}
-	return s / float64(len(y))
 }
 
 // valLoss is the mean held-out loss used for early stopping: squared error for
@@ -222,26 +221,40 @@ func clampInt(n, lo, hi int) int {
 	return n
 }
 
-// baseScores returns the initial per-class raw score (the constant model): the
-// label log-odds for Binary, per-class log-frequency for Multiclass.
-func baseScores(y []float64, k, n int) []float64 {
+// baseScores returns the initial per-class raw score (the constant model) over
+// the training rows idx: the label log-odds for Binary, per-class log-frequency
+// for Multiclass.
+func baseScores(y []float64, idx []int, k int) []float64 {
+	n := float64(len(idx))
 	if k == 1 {
 		var pos float64
-		for _, yi := range y {
-			pos += yi
+		for _, i := range idx {
+			pos += y[i]
 		}
-		mean := clamp(pos/float64(n), 1e-6, 1-1e-6)
+		mean := clamp(pos/n, 1e-6, 1-1e-6)
 		return []float64{math.Log(mean / (1 - mean))}
 	}
 	cnt := make([]float64, k)
-	for _, yi := range y {
-		cnt[int(yi)]++
+	for _, i := range idx {
+		cnt[int(y[i])]++
 	}
 	base := make([]float64, k)
 	for c := range base {
-		base[c] = math.Log(clamp(cnt[c]/float64(n), 1e-6, 1))
+		base[c] = math.Log(clamp(cnt[c]/n, 1e-6, 1))
 	}
 	return base
+}
+
+// meanIdx is the mean of y over the given indices (the regression base score).
+func meanIdx(y []float64, idx []int) float64 {
+	if len(idx) == 0 {
+		return 0
+	}
+	var s float64
+	for _, i := range idx {
+		s += y[i]
+	}
+	return s / float64(len(idx))
 }
 
 // gradHess is the shared GBDT derivative shape for a probability p and 0/1

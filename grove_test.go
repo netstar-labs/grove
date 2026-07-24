@@ -336,3 +336,29 @@ func TestGoldenPredictions(t *testing.T) {
 		}
 	}
 }
+
+func TestNeutralAndInputValidation(t *testing.T) {
+	X, y := genXOR(500, 60)
+	m, _ := Fit(X, y, Params{Objective: Binary, Rounds: 20, MaxDepth: 3})
+	// C1: a short binary vector is neutral 0.5, not a confident 1.0
+	if p := m.Predict([]float64{0.5})[0]; p != 0.5 {
+		t.Errorf("binary short-vector Predict = %v, want 0.5", p)
+	}
+	if _, p := m.PredictClassProba([]float64{0.5}); p != 0.5 {
+		t.Errorf("binary short-vector PredictClassProba prob = %v, want 0.5", p)
+	}
+	// C2: zero-feature and ragged rows error instead of panicking
+	if _, err := Fit([][]float64{{}, {}}, []float64{0, 1}, Params{}); err == nil {
+		t.Error("zero-feature dataset should error")
+	}
+	if _, err := Fit([][]float64{{1, 2}, {3}}, []float64{0, 1}, Params{}); err == nil {
+		t.Error("ragged rows should error")
+	}
+	// C6: an unknown objective is rejected on Load
+	var buf bytes.Buffer
+	m.Save(&buf)
+	bad := bytes.Replace(buf.Bytes(), []byte(`"objective": "binary"`), []byte(`"objective": "bogus"`), 1)
+	if _, err := Load(bytes.NewReader(bad)); err == nil {
+		t.Error("unknown objective should be rejected on Load")
+	}
+}
