@@ -32,7 +32,7 @@ type Params struct {
 	LearningRate   float64 // shrinkage applied to each tree's leaves
 	MaxDepth       int     // maximum tree depth
 	MaxBins        int     // histogram bins per feature (2..256)
-	Lambda         float64 // L2 regularization on leaf weights
+	Lambda         float64 // L2 regularization on leaf weights (0 uses the default; negative = none)
 	Gamma          float64 // minimum gain to make a split
 	MinChildWeight float64 // minimum summed hessian in a child
 	Subsample      float64 // row fraction sampled per tree (0..1]
@@ -82,6 +82,11 @@ func (p *Params) fill() error {
 	}
 	if p.MaxBins > 256 {
 		p.MaxBins = 256
+	}
+	// A zero Lambda takes the default like the other knobs; pass a negative
+	// value (clamped to 0) when you want literally no L2 regularization.
+	if p.Lambda == 0 {
+		p.Lambda = d.Lambda
 	}
 	if p.Lambda < 0 {
 		p.Lambda = 0

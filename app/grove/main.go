@@ -14,7 +14,9 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 
@@ -87,8 +89,7 @@ func train(args []string) error {
 	for _, r := range rows {
 		classSet[r[tCol]] = true
 	}
-	classes := keys(classSet)
-	sort.Strings(classes)
+	classes := slices.Sorted(maps.Keys(classSet))
 	classIdx := map[string]int{}
 	for i, c := range classes {
 		classIdx[c] = i
@@ -113,13 +114,8 @@ func train(args []string) error {
 		Subsample: *subsample, Seed: *seed,
 	}
 	if len(classes) == 2 {
+		// sorted distinct classes map to {0,1}, so y is already 0/1
 		p.Objective = grove.Binary
-		// binary label = 1 for classes[1]
-		for i := range y {
-			if y[i] > 0 {
-				y[i] = 1
-			}
-		}
 	} else {
 		p.Objective, p.NumClass = grove.Multiclass, len(classes)
 	}
@@ -179,19 +175,11 @@ func predict(args []string) error {
 	if *in == "" {
 		return fmt.Errorf("predict needs -in")
 	}
-	m, err := loadModel(*modelPath)
+	m, header, rows, cols, err := loadModelAndRows(*modelPath, *in)
 	if err != nil {
 		return err
 	}
-	header, rows, err := readCSV(*in)
-	if err != nil {
-		return err
-	}
-	cols, err := alignFeatures(header, m.FeatureNames)
-	if err != nil {
-		return err
-	}
-	srcCol := indexOf(header, "source")
+	srcCol := slices.Index(header, "source")
 
 	w := csv.NewWriter(os.Stdout)
 	defer w.Flush()
@@ -201,14 +189,7 @@ func predict(args []string) error {
 		if err != nil {
 			return err
 		}
-		cls := m.PredictClass(x)
-		prob := m.Predict(x)
-		p := prob[0]
-		if m.NumClass > 1 {
-			p = prob[cls]
-		} else if cls == 0 {
-			p = 1 - prob[0]
-		}
+		cls, p := m.PredictClassProba(x) // one ensemble pass for class + probability
 		src := ""
 		if srcCol >= 0 {
 			src = r[srcCol]
@@ -229,19 +210,14 @@ func eval(args []string) error {
 	if *in == "" || *target == "" {
 		return fmt.Errorf("eval needs -in and -target")
 	}
-	m, err := loadModel(*modelPath)
+	m, header, rows, cols, err := loadModelAndRows(*modelPath, *in)
 	if err != nil {
 		return err
 	}
-	header, rows, err := readCSV(*in)
-	if err != nil {
-		return err
+	if len(rows) == 0 {
+		return fmt.Errorf("no data rows in %s", *in)
 	}
-	cols, err := alignFeatures(header, m.FeatureNames)
-	if err != nil {
-		return err
-	}
-	tCol := indexOf(header, *target)
+	tCol := slices.Index(header, *target)
 	if tCol < 0 {
 		return fmt.Errorf("target column %q not found", *target)
 	}
@@ -261,10 +237,8 @@ func eval(args []string) error {
 		confusion[actual+"→"+pred]++
 	}
 	fmt.Printf("accuracy: %.4f (%d/%d)\n", float64(correct)/float64(len(rows)), correct, len(rows))
-	keys := keys(setFromMap(confusion))
-	sort.Strings(keys)
 	fmt.Println("actual→predicted:")
-	for _, k := range keys {
+	for _, k := range slices.Sorted(maps.Keys(confusion)) {
 		fmt.Printf("  %-28s %d\n", k, confusion[k])
 	}
 	return nil

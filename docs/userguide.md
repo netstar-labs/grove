@@ -31,7 +31,7 @@ m2, _ := grove.Load(r)
 | `LearningRate` | 0.1 | shrinkage per tree |
 | `MaxDepth` | 6 | max tree depth |
 | `MaxBins` | 256 | histogram bins per feature (2..256) |
-| `Lambda` | 1 | L2 regularization on leaf weights |
+| `Lambda` | 1 | L2 regularization on leaf weights (0 → the default 1; pass a negative value for none) |
 | `Gamma` | 0 | minimum gain to split |
 | `MinChildWeight` | 1 | minimum summed hessian in a child |
 | `Subsample` | 1 | row fraction sampled per tree |

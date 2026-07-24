@@ -42,6 +42,29 @@ func (m *Model) Predict(x []float64) []float64 {
 	return out
 }
 
+// PredictClassProba returns the most likely class and its probability in a
+// single pass over the ensemble — cheaper than calling PredictClass and Predict
+// separately (each of which walks every tree).
+func (m *Model) PredictClassProba(x []float64) (int, float64) {
+	raw := m.rawScores(x)
+	if m.NumClass == 1 {
+		p := sigmoid(raw[0])
+		if p >= 0.5 {
+			return 1, p
+		}
+		return 0, 1 - p
+	}
+	prob := make([]float64, m.NumClass)
+	softmax(raw, prob)
+	best := 0
+	for c := 1; c < len(prob); c++ {
+		if prob[c] > prob[best] {
+			best = c
+		}
+	}
+	return best, prob[best]
+}
+
 // PredictClass returns the most likely class index (0/1 for Binary).
 func (m *Model) PredictClass(x []float64) int {
 	raw := m.rawScores(x)
@@ -79,9 +102,12 @@ func (m *Model) Importance() []float64 {
 // TreeCount reports the total number of trees in the ensemble.
 func (m *Model) TreeCount() int { return len(m.Rounds) * m.NumClass }
 
-// Save writes the model as JSON.
+// Save writes the model as indented JSON, so a retrain produces a readable
+// git diff rather than one changed line.
 func (m *Model) Save(w io.Writer) error {
-	return json.NewEncoder(w).Encode(m)
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", " ")
+	return enc.Encode(m)
 }
 
 // Load reads a model written by Save.

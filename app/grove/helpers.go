@@ -4,7 +4,9 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"math"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -33,7 +35,7 @@ func readCSV(path string) (header []string, rows [][]string, err error) {
 // columns resolves the target column index and the feature columns (everything
 // not the target and not ignored), preserving header order.
 func columns(header []string, target string, ignore map[string]bool) (cols []int, names []string, tCol int, err error) {
-	tCol = indexOf(header, target)
+	tCol = slices.Index(header, target)
 	if tCol < 0 {
 		return nil, nil, -1, fmt.Errorf("target column %q not in header", target)
 	}
@@ -55,7 +57,7 @@ func columns(header []string, target string, ignore map[string]bool) (cols []int
 func alignFeatures(header, featNames []string) ([]int, error) {
 	cols := make([]int, len(featNames))
 	for j, name := range featNames {
-		i := indexOf(header, name)
+		i := slices.Index(header, name)
 		if i < 0 {
 			return nil, fmt.Errorf("model feature %q missing from input header", name)
 		}
@@ -64,13 +66,17 @@ func alignFeatures(header, featNames []string) ([]int, error) {
 	return cols, nil
 }
 
-// features extracts a numeric feature vector from a row at the given columns.
+// features extracts a numeric feature vector from a row at the given columns,
+// rejecting non-numeric and non-finite cells (a NaN/Inf would route silently).
 func features(row []string, cols []int) ([]float64, error) {
 	x := make([]float64, len(cols))
 	for j, c := range cols {
 		v, err := strconv.ParseFloat(strings.TrimSpace(row[c]), 64)
 		if err != nil {
 			return nil, fmt.Errorf("column %d (%q) is not numeric", c, row[c])
+		}
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return nil, fmt.Errorf("column %d (%q) is not finite", c, row[c])
 		}
 		x[j] = v
 	}
@@ -86,20 +92,24 @@ func loadModel(path string) (*grove.Model, error) {
 	return grove.Load(f)
 }
 
+// loadModelAndRows is the shared predict/eval prelude: open the model, read the
+// input CSV, and align its columns to the model's feature names.
+func loadModelAndRows(modelPath, in string) (m *grove.Model, header []string, rows [][]string, cols []int, err error) {
+	if m, err = loadModel(modelPath); err != nil {
+		return
+	}
+	if header, rows, err = readCSV(in); err != nil {
+		return
+	}
+	cols, err = alignFeatures(header, m.FeatureNames)
+	return
+}
+
 func className(m *grove.Model, cls int) string {
 	if cls >= 0 && cls < len(m.Classes) {
 		return m.Classes[cls]
 	}
 	return strconv.Itoa(cls)
-}
-
-func indexOf(ss []string, s string) int {
-	for i, v := range ss {
-		if v == s {
-			return i
-		}
-	}
-	return -1
 }
 
 func splitSet(csv string) map[string]bool {
@@ -110,20 +120,4 @@ func splitSet(csv string) map[string]bool {
 		}
 	}
 	return set
-}
-
-func keys(m map[string]bool) []string {
-	ks := make([]string, 0, len(m))
-	for k := range m {
-		ks = append(ks, k)
-	}
-	return ks
-}
-
-func setFromMap(m map[string]int) map[string]bool {
-	s := make(map[string]bool, len(m))
-	for k := range m {
-		s[k] = true
-	}
-	return s
 }

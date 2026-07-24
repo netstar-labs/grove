@@ -28,6 +28,12 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 				return nil, errors.New("grove: label out of range for NumClass")
 			}
 		}
+	} else {
+		for _, yi := range y {
+			if yi != 0 && yi != 1 {
+				return nil, errors.New("grove: binary labels must be 0 or 1")
+			}
+		}
 	}
 
 	bnr := fitBinner(X, p.MaxBins)
@@ -65,10 +71,7 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		trees := make([]tree, k)
 		for c := 0; c < k; c++ {
 			gradients(raw, y, c, k, prob, g, h)
-			idx := all
-			if p.Subsample < 1 {
-				idx = subsample(all, p.Subsample, rng)
-			}
+			idx := subsample(all, p.Subsample, rng) // returns all unchanged when Subsample==1
 			t := buildTree(bt, bnr.edges, g, h, idx, tp)
 			for i := 0; i < n; i++ {
 				raw[i][c] += t.predict(X[i])
@@ -102,15 +105,19 @@ func baseScores(y []float64, k, n int) []float64 {
 	return base
 }
 
+// gradHess is the shared GBDT derivative shape for a probability p and 0/1
+// target: gradient p−target, hessian p(1−p) floored to keep splits finite.
+func gradHess(p, target float64) (g, h float64) {
+	const eps = 1e-6
+	return p - target, math.Max(p*(1-p), eps)
+}
+
 // gradients fills g,h with the first/second derivatives of the loss w.r.t. the
 // raw score of class c (logistic for Binary, softmax for Multiclass).
 func gradients(raw [][]float64, y []float64, c, k int, prob, g, h []float64) {
-	const eps = 1e-6
 	if k == 1 {
 		for i := range raw {
-			p := sigmoid(raw[i][0])
-			g[i] = p - y[i]
-			h[i] = math.Max(p*(1-p), eps)
+			g[i], h[i] = gradHess(sigmoid(raw[i][0]), y[i])
 		}
 		return
 	}
@@ -120,7 +127,6 @@ func gradients(raw [][]float64, y []float64, c, k int, prob, g, h []float64) {
 		if int(y[i]) == c {
 			yc = 1
 		}
-		g[i] = prob[c] - yc
-		h[i] = math.Max(prob[c]*(1-prob[c]), eps)
+		g[i], h[i] = gradHess(prob[c], yc)
 	}
 }

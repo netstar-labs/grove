@@ -1,6 +1,9 @@
 package grove
 
-import "sort"
+import (
+	"slices"
+	"sort"
+)
 
 // binner maps each feature's continuous values onto a small set of ordinal bins
 // via quantile edges. Split search then runs over per-bin gradient histograms
@@ -35,12 +38,7 @@ func fitBinner(X [][]float64, maxBins int) *binner {
 func quantileEdges(col []float64, maxBins int) []float64 {
 	vals := append([]float64(nil), col...)
 	sort.Float64s(vals)
-	uniq := vals[:0]
-	for i, v := range vals {
-		if i == 0 || v != vals[i-1] {
-			uniq = append(uniq, v)
-		}
-	}
+	uniq := slices.Compact(vals) // sorted, so this is a full de-dup in place
 	if len(uniq) <= 1 {
 		return nil
 	}

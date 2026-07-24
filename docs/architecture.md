@@ -25,8 +25,10 @@ y []float64 ──────────────────────�
 ## Binning (`bins.go`)
 
 Continuous features are mapped to at most `MaxBins` (≤256, so a `uint8` holds a
-bin) ordinal bins via **quantile edges** — split points chosen so each bin holds
-a roughly equal share of the data. A constant column collapses to one bin. Bins
+bin) ordinal bins via **quantile edges** — for a high-cardinality column, split
+points chosen so each bin holds a roughly equal share of the data; a column with
+fewer than `MaxBins` distinct values simply gets one bin per value. A constant
+column collapses to one bin. Bins
 exist only during training: each tree node stores the real edge value as its
 threshold, so `Predict` compares raw features and never needs the binner. The
 binned matrix is stored **feature-major** (`bt[feature][sample]`) so building a

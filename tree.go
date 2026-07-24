@@ -57,6 +57,10 @@ func buildTree(bt [][]uint8, edges [][]float64, g, h []float64, idx []int, p tre
 	return *b.t
 }
 
+// score is the regularized similarity term G²/(H+λ) that appears three times in
+// the split gain (parent and both children). Distinct from a leaf's weight.
+func score(G, H, lambda float64) float64 { return G * G / (H + lambda) }
+
 // leafValue is the regularized optimal weight for a leaf: -G/(H+λ), shrunk by
 // the learning rate.
 func (b *builder) leafValue(G, H float64) float64 {
@@ -100,7 +104,7 @@ func (b *builder) grow(idx []int, depth int) int {
 			if HL < b.p.minChildWeight || HR < b.p.minChildWeight {
 				continue
 			}
-			gain := 0.5 * (GL*GL/(HL+b.p.lambda) + GR*GR/(HR+b.p.lambda) - G*G/(H+b.p.lambda))
+			gain := 0.5 * (score(GL, HL, b.p.lambda) + score(GR, HR, b.p.lambda) - score(G, H, b.p.lambda))
 			if gain > bestGain {
 				bestF, bestBin, bestGain = f, bin, gain
 			}
