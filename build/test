@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# build/test — the full test gauntlet for grove. Standalone module, so GOWORK=off.
+# Runs formatting, vet, build, race tests, a fuzz smoke on the parsing/model
+# surfaces, and the runnable validation harness (which recovers a known decision
+# boundary and exits non-zero on regression).
+#
+#   build/test            # full run
+#   FUZZTIME=30s build/test
+set -euo pipefail
+export GOWORK=off
+cd "$(dirname "$0")/.."
+FUZZTIME="${FUZZTIME:-8s}"
+
+echo "== gofmt =="
+if out=$(gofmt -l .) && [ -n "$out" ]; then
+	echo "unformatted:"; echo "$out"; exit 1
+fi
+
+echo "== go vet =="
+go vet ./...
+
+echo "== go build =="
+go build ./...
+
+echo "== go test -race =="
+go test -race ./...
+
+echo "== fuzz smoke (${FUZZTIME} each) =="
+go test -run '^$' -fuzz FuzzFit -fuzztime "$FUZZTIME" .
+go test -run '^$' -fuzz FuzzLoadPredict -fuzztime "$FUZZTIME" .
+go test -run '^$' -fuzz FuzzFeatures -fuzztime "$FUZZTIME" ./app/grove
+
+echo "== validation harness (known-boundary recovery) =="
+go run ./example/validate
+
+echo "== OK =="

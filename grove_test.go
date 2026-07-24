@@ -304,3 +304,35 @@ func TestMissingValues(t *testing.T) {
 		t.Fatal("missing-value routing not preserved across save/load")
 	}
 }
+
+// TestGoldenPredictions is the versioned known-data confirmation: a fixed dataset
+// and params produce a deterministic model, and these committed reference values
+// pin its predictions. A change here means the training math moved — intended or
+// not. (Tolerance absorbs cross-platform float rounding; a real regression shifts
+// predictions far more.)
+func TestGoldenPredictions(t *testing.T) {
+	X, y := genXOR(800, 12345)
+	m, err := Fit(X, y, Params{Objective: Binary, Rounds: 60, MaxDepth: 4, LearningRate: 0.2, Seed: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.TreeCount() != 60 {
+		t.Fatalf("TreeCount = %d, want 60", m.TreeCount())
+	}
+	cases := []struct {
+		x    []float64
+		want float64
+	}{
+		{[]float64{0.2, 0.8, 0.5, 0.5, 0.5, 0.5}, 0.966291642881},
+		{[]float64{0.8, 0.2, 0.5, 0.5, 0.5, 0.5}, 0.855548805048},
+		{[]float64{0.2, 0.2, 0.5, 0.5, 0.5, 0.5}, 0.029341303312},
+		{[]float64{0.9, 0.9, 0.5, 0.5, 0.5, 0.5}, 0.031087235307},
+		{[]float64{0.4, 0.6, 0.5, 0.5, 0.5, 0.5}, 0.741519308524},
+	}
+	for i, c := range cases {
+		got := m.Predict(c.x)[0]
+		if math.Abs(got-c.want) > 1e-6 {
+			t.Errorf("golden[%d]: got %.12f, want %.12f", i, got, c.want)
+		}
+	}
+}

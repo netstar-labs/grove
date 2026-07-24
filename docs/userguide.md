@@ -91,6 +91,7 @@ inspectable and diffable — a retrain's changes show up in a `git diff`.
 ```sh
 GOWORK=off go build ./...          # standalone (grove has no workspace siblings)
 GOWORK=off go test ./...           # unit tests + validation
+build/test                         # full gauntlet: fmt, vet, race, fuzz, harness
 build/grove                        # cross-compile + package the CLI (build/install/)
 build/grove user@host              # also scp + install on a host
 ```
