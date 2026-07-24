@@ -2,6 +2,8 @@ package grove
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 )
 
@@ -41,8 +43,12 @@ func (m *Model) rawBinary(x []float64) float64 {
 }
 
 // Predict returns calibrated probabilities: a single P(class=1) for Binary, or a
-// NumClass-length distribution for Multiclass.
+// NumClass-length distribution for Multiclass. A feature vector shorter than
+// NumFeature yields a neutral prediction rather than a panic.
 func (m *Model) Predict(x []float64) []float64 {
+	if len(x) < m.NumFeature {
+		return neutral(m.NumClass)
+	}
 	if m.NumClass == 1 {
 		return []float64{sigmoid(m.rawBinary(x))}
 	}
@@ -51,10 +57,23 @@ func (m *Model) Predict(x []float64) []float64 {
 	return out
 }
 
+// neutral is the no-information prediction used when a caller passes too few
+// features: 0.5 for Binary, a uniform distribution for Multiclass.
+func neutral(k int) []float64 {
+	out := make([]float64, max(k, 1))
+	for i := range out {
+		out[i] = 1 / float64(len(out))
+	}
+	return out
+}
+
 // PredictClassProba returns the most likely class and its probability in a
 // single pass over the ensemble — cheaper than calling PredictClass and Predict
 // separately (each of which walks every tree).
 func (m *Model) PredictClassProba(x []float64) (int, float64) {
+	if len(x) < m.NumFeature {
+		return 0, 1 / float64(max(m.NumClass, 1))
+	}
 	if m.NumClass == 1 {
 		p := sigmoid(m.rawBinary(x))
 		if p >= 0.5 {
@@ -75,6 +94,9 @@ func (m *Model) PredictClassProba(x []float64) (int, float64) {
 
 // PredictClass returns the most likely class index (0/1 for Binary).
 func (m *Model) PredictClass(x []float64) int {
+	if len(x) < m.NumFeature {
+		return 0
+	}
 	if m.NumClass == 1 {
 		if m.rawBinary(x) >= 0 { // sigmoid(raw)>=0.5 ⟺ raw>=0
 			return 1
@@ -118,11 +140,61 @@ func (m *Model) Save(w io.Writer) error {
 	return enc.Encode(m)
 }
 
-// Load reads a model written by Save.
+// Load reads and validates a model written by Save. A structurally unsound
+// model (bad class counts, out-of-range features, non-forward child links) is
+// rejected here so Predict can never panic on a corrupt or hostile file.
 func Load(r io.Reader) (*Model, error) {
 	var m Model
 	if err := json.NewDecoder(r).Decode(&m); err != nil {
 		return nil, err
 	}
+	if err := m.validate(); err != nil {
+		return nil, err
+	}
 	return &m, nil
+}
+
+// validate checks the invariants Predict relies on.
+func (m *Model) validate() error {
+	if m.NumClass < 1 {
+		return fmt.Errorf("grove: num_class %d < 1", m.NumClass)
+	}
+	if len(m.Base) != m.NumClass {
+		return fmt.Errorf("grove: base has %d scores, want num_class %d", len(m.Base), m.NumClass)
+	}
+	if m.NumFeature < 0 {
+		return fmt.Errorf("grove: num_feature %d < 0", m.NumFeature)
+	}
+	for r, round := range m.Rounds {
+		if len(round) != m.NumClass {
+			return fmt.Errorf("grove: round %d has %d trees, want %d", r, len(round), m.NumClass)
+		}
+		for c := range round {
+			if err := validateTree(round[c], m.NumFeature); err != nil {
+				return fmt.Errorf("grove: round %d class %d: %w", r, c, err)
+			}
+		}
+	}
+	return nil
+}
+
+// validateTree confirms a tree is a finite, forward-linked DAG (children are
+// appended after their parent during growth, so every child index is > its
+// parent) with in-range feature references.
+func validateTree(t tree, numFeature int) error {
+	if len(t.Nodes) == 0 {
+		return errors.New("empty tree")
+	}
+	for i, n := range t.Nodes {
+		if n.Leaf {
+			continue
+		}
+		if n.Feature < 0 || n.Feature >= numFeature {
+			return fmt.Errorf("node %d feature %d out of range [0,%d)", i, n.Feature, numFeature)
+		}
+		if n.Left <= i || n.Left >= len(t.Nodes) || n.Right <= i || n.Right >= len(t.Nodes) {
+			return fmt.Errorf("node %d has invalid child links l=%d r=%d (nodes=%d)", i, n.Left, n.Right, len(t.Nodes))
+		}
+	}
+	return nil
 }
