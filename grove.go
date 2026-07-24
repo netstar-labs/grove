@@ -36,7 +36,9 @@ type Params struct {
 	Gamma          float64 // minimum gain to make a split
 	MinChildWeight float64 // minimum summed hessian in a child
 	Subsample      float64 // row fraction sampled per tree (0..1]
-	Seed           int64   // RNG seed for subsampling (reproducible)
+	ValFraction    float64 // rows held out for early-stopping validation (0 = none, capped at 0.5)
+	EarlyStop      int     // stop after this many rounds without val-loss improvement (0 = off)
+	Seed           int64   // RNG seed for subsampling + the val split (reproducible)
 }
 
 // Default returns sensible starting parameters for the given objective.
@@ -96,6 +98,15 @@ func (p *Params) fill() error {
 	}
 	if p.Subsample <= 0 || p.Subsample > 1 {
 		p.Subsample = 1
+	}
+	if p.EarlyStop > 0 && p.ValFraction <= 0 {
+		p.ValFraction = 0.1 // sensible default hold-out when early stopping is on
+	}
+	if p.ValFraction < 0 {
+		p.ValFraction = 0
+	}
+	if p.ValFraction > 0.5 {
+		p.ValFraction = 0.5
 	}
 	if p.Seed == 0 {
 		p.Seed = d.Seed

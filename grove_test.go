@@ -179,3 +179,19 @@ func TestFitErrors(t *testing.T) {
 		t.Error("label out of class range should error")
 	}
 }
+
+func TestEarlyStopping(t *testing.T) {
+	X, y := genXOR(4000, 20)
+	es, err := Fit(X, y, Params{Objective: Binary, Rounds: 500, MaxDepth: 4, LearningRate: 0.2, EarlyStop: 12, ValFraction: 0.2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if es.TreeCount() >= 500 {
+		t.Errorf("early stopping did not trim the ensemble: %d trees", es.TreeCount())
+	}
+	Xte, yte := genXOR(1000, 21)
+	if acc := accuracy(es, Xte, yte); acc < 0.9 {
+		t.Errorf("early-stopped test accuracy %.3f < 0.90", acc)
+	}
+	t.Logf("early stop kept %d/500 rounds, test acc %.3f", es.TreeCount(), accuracy(es, Xte, yte))
+}

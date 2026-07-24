@@ -69,6 +69,8 @@ func train(args []string) error {
 	depth := fs.Int("depth", 6, "max tree depth")
 	lr := fs.Float64("lr", 0.1, "learning rate")
 	subsample := fs.Float64("subsample", 1.0, "row subsample fraction")
+	earlyStop := fs.Int("earlystop", 0, "stop after N rounds without val-loss improvement (0=off)")
+	valFrac := fs.Float64("valfrac", 0.1, "validation hold-out fraction (used with -earlystop)")
 	seed := fs.Int64("seed", 1, "RNG seed")
 	fs.Parse(args)
 	if *in == "" || *target == "" {
@@ -112,6 +114,7 @@ func train(args []string) error {
 	p := grove.Params{
 		Rounds: *rounds, MaxDepth: *depth, LearningRate: *lr,
 		Subsample: *subsample, Seed: *seed,
+		EarlyStop: *earlyStop, ValFraction: *valFrac,
 	}
 	if len(classes) == 2 {
 		// sorted distinct classes map to {0,1}, so y is already 0/1

@@ -61,11 +61,24 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		lr:             p.LearningRate,
 	}
 
+	// optional train/validation split for early stopping (val rows never enter a
+	// tree; their running score is kept only to measure held-out loss).
+	trainIdx := iota0(n)
+	var valIdx []int
+	if p.EarlyStop > 0 && p.ValFraction > 0 && n >= 4 {
+		sp := iota0(n)
+		sr := rand.New(rand.NewSource(p.Seed ^ 0x9e3779b9))
+		sr.Shuffle(n, func(i, j int) { sp[i], sp[j] = sp[j], sp[i] })
+		nv := clampInt(int(p.ValFraction*float64(n)), 1, n-1)
+		valIdx, trainIdx = sp[:nv], sp[nv:]
+	}
+
 	prob := make([]float64, k)
-	perm := iota0(n)
-	ks := n
+	perm := append([]int(nil), trainIdx...)
+	nt := len(trainIdx)
+	ks := nt
 	if p.Subsample < 1 {
-		if ks = int(p.Subsample * float64(n)); ks < 1 {
+		if ks = int(p.Subsample * float64(nt)); ks < 1 {
 			ks = 1
 		}
 	}
@@ -92,6 +105,7 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		}
 	}
 
+	bestRound, bestLoss, since := -1, math.Inf(1), 0
 	for round := 0; round < p.Rounds; round++ {
 		trees := make([]tree, k)
 		if k == 1 {
@@ -124,8 +138,56 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 			}
 		}
 		m.Rounds = append(m.Rounds, trees)
+
+		if p.EarlyStop > 0 {
+			loss := valLoss(raw, y, valIdx, k)
+			if loss < bestLoss-1e-12 {
+				bestLoss, bestRound, since = loss, round, 0
+			} else if since++; since >= p.EarlyStop {
+				break
+			}
+		}
+	}
+	// early stopping keeps only the trees up to the best validation round.
+	if p.EarlyStop > 0 && bestRound >= 0 && bestRound+1 < len(m.Rounds) {
+		m.Rounds = m.Rounds[:bestRound+1]
 	}
 	return m, nil
+}
+
+// valLoss is mean logloss over the held-out indices — the early-stopping metric.
+func valLoss(raw [][]float64, y []float64, idx []int, k int) float64 {
+	if len(idx) == 0 {
+		return 0
+	}
+	var s float64
+	if k == 1 {
+		for _, i := range idx {
+			p := clamp(sigmoid(raw[i][0]), 1e-15, 1-1e-15)
+			if y[i] == 1 {
+				s -= math.Log(p)
+			} else {
+				s -= math.Log(1 - p)
+			}
+		}
+	} else {
+		prob := make([]float64, k)
+		for _, i := range idx {
+			softmax(raw[i], prob)
+			s -= math.Log(clamp(prob[int(y[i])], 1e-15, 1))
+		}
+	}
+	return s / float64(len(idx))
+}
+
+func clampInt(n, lo, hi int) int {
+	if n < lo {
+		return lo
+	}
+	if n > hi {
+		return hi
+	}
+	return n
 }
 
 // baseScores returns the initial per-class raw score (the constant model): the

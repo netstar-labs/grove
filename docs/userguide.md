@@ -35,7 +35,9 @@ m2, _ := grove.Load(r)
 | `Gamma` | 0 | minimum gain to split |
 | `MinChildWeight` | 1 | minimum summed hessian in a child |
 | `Subsample` | 1 | row fraction sampled per tree |
-| `Seed` | 1 | RNG seed (subsampling); a fit is reproducible for a fixed seed |
+| `ValFraction` | 0 | rows held out for early-stopping validation (auto 0.1 when `EarlyStop` set; capped 0.5) |
+| `EarlyStop` | 0 | stop after this many rounds with no held-out log-loss improvement, then keep the best round (0 = off) |
+| `Seed` | 1 | RNG seed (subsampling + val split); a fit is reproducible for a fixed seed |
 
 Unset (zero) fields are filled with the defaults above, so `grove.Fit(X, y,
 grove.Params{Objective: grove.Binary})` is valid.
@@ -70,6 +72,7 @@ grove version
 | `-out` | `model.json` | model output path |
 | `-rounds` / `-depth` / `-lr` | 100 / 6 / 0.1 | boosting rounds / max depth / learning rate |
 | `-subsample` / `-seed` | 1.0 / 1 | row subsample fraction / RNG seed |
+| `-earlystop` / `-valfrac` | 0 / 0.1 | stop after N rounds w/o val-loss gain (0=off) / hold-out fraction |
 
 `predict` and `eval` align input columns to the model's stored feature names by
 name, so column order in the input need not match training.
