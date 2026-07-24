@@ -86,6 +86,30 @@ scores), `learning_rate`, `rounds` (a list of rounds, each a list of trees; a
 tree is a flat `nodes` array), and optional `feature_names` / `classes`. It is
 inspectable and diffable — a retrain's changes show up in a `git diff`.
 
+## Connectors (`serve` / `mcp`)
+
+One model server, three transports over the same core. Full walkthrough in
+[howto.md](howto.md#8-connectors--http--unix--mcp).
+
+```sh
+grove serve -http :8080 -unix /run/grove.sock -dir models   # HTTP and/or unix
+grove mcp   -dir models                                     # MCP stdio (AI agents)
+```
+
+HTTP endpoints (the unix socket serves the same mux):
+
+| Method + path | Body / query | Returns |
+|---|---|---|
+| `POST /train` | `{params, features, labels, feature_names?, classes?, save?}` | model summary + importance |
+| `POST /predict` | `{features:[[...]]}` | `{classes,labels,probabilities}` or `{values}` (regression) |
+| `POST /save?name=` | — | `{saved}` |
+| `POST /load?name=` | — | model metadata (reloads from disk) |
+| `GET /model` | — | current model metadata |
+
+`params` mirrors the `Params` struct (fields by name). Model names must be plain
+base names — no path separators. MCP exposes the same operations as tools
+`grove_train` / `grove_predict` / `grove_save` / `grove_load` / `grove_model_info`.
+
 ## Building
 
 ```sh

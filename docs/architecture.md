@@ -1,7 +1,8 @@
 # grove — architecture
 
-grove is a flat library at the repo root (`package grove`) plus a thin CLI under
-`app/grove`. Five files, one concern each. This doc walks the pipeline from raw
+grove is a flat library at the repo root (`package grove`), a thin CLI under
+`app/grove`, and two connector sub-packages (`pkg/serve` for HTTP/unix, `pkg/mcp`
+for MCP). The root is one concern per file. This doc walks the pipeline from raw
 features to a scored prediction.
 
 ## Data flow
@@ -37,9 +38,10 @@ feature's histogram is a linear, cache-friendly pass.
 ## Tree growth (`tree.go`)
 
 Each tree is grown depth-first to `MaxDepth`. A node's histogram — per-feature,
-per-bin sums of gradients and hessians, stored as one flat array with stride
-`maxBins` — is built once; the best split is found by scanning it left→right
-tracking the cumulative left sum, maximizing the regularized gain
+per-bin sums of gradients and hessians, packed into one flat array by per-feature
+offset (so a high-cardinality feature doesn't inflate the stride for the rest) —
+is built once; the best split is found by scanning it left→right tracking the
+cumulative left sum, maximizing the regularized gain
 
 ```
 gain = ½ [ GL²/(HL+λ) + GR²/(HR+λ) − G²/(H+λ) ]
@@ -105,3 +107,21 @@ smaller additional win on top.
   the missing bin is empty, so splits are identical to having no missing bin.
 - **Single-machine, in-memory.** No distribution, no out-of-core. Deliberate: the
   target is inline scoring and modest corpora, not leaderboard scale.
+
+## Scale
+
+grove is single-machine and in-memory, everything `float64`. The footprint is
+dominated by the feature matrix: `X` = `8·n·d` bytes, plus the binned copy `n·d`
+(uint8), plus `~8·n·K` for running scores and gradients — roughly **~9·n·d
+bytes**. The node-histogram arena is a fixed handful of buffers sized to Σnb (per-
+feature bins), independent of `n`. Fit time ≈ `rounds·K·n·d·depth`, halved per
+level by histogram subtraction.
+
+| Tier | Size | Footprint | Fit |
+|---|---|---|---|
+| **Comfortable** | ≤ ~1M rows × ~50–100 feat (n·d ≲ 10⁸) | a few GB | seconds–a minute |
+| **Large** (where float32 would help) | ~1M–10M rows × 100+ feat (n·d ~ 10⁸–10⁹) | 5–40 GB, dominated by float64 `X` | minutes; strains RAM |
+| **Beyond grove** | > ~10M rows / tens of GB | exceeds RAM | out-of-core / distributed (XGBoost/LightGBM) |
+
+So `float32` (halving `X`) and an out-of-core/mmap loader only start paying off
+past **~1M rows or ~10⁸ feature-cells / a few GB**. Both are on the roadmap.

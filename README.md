@@ -29,6 +29,7 @@ host, no Python, no native library.
 - **Operations** — [docs/userguide.md](docs/userguide.md) (library API, CLI
   flags, CSV/model formats).
 - **Examples** — [example/README.md](example/README.md) (runnable programs).
+- **How-to** — [docs/howto.md](docs/howto.md) (step-by-step: library, CLI, and the HTTP/unix/MCP connectors).
 
 ## Quick start
 
@@ -52,9 +53,11 @@ grove eval    -model model.json -in data.csv -target type
 | [`grove.go`](grove.go) | package doc, `Params`, defaults, numeric helpers (sigmoid/softmax) |
 | [`bins.go`](bins.go) | quantile feature binning (the histogram substrate) |
 | [`tree.go`](tree.go) | regression tree: node/tree types, histogram split finding, growth |
-| [`boost.go`](boost.go) | the boosting loop (`Fit`), base scores, logistic/softmax gradients |
-| [`model.go`](model.go) | `Model`: `Predict`/`PredictClass`, `Importance`, JSON save/load |
-| [`app/grove/`](app/grove) | CLI: `train` / `predict` / `eval` over CSV |
+| [`boost.go`](boost.go) | the boosting loop (`Fit`), base scores, logistic/softmax/regression gradients, early stopping |
+| [`model.go`](model.go) | `Model`: `Predict`/`PredictClass`/`PredictValue`, batch, `Importance`, versioned JSON save/load |
+| [`app/grove/`](app/grove) | CLI: `train`/`predict`/`eval`/`serve`/`mcp` |
+| [`pkg/serve/`](pkg/serve) | HTTP + unix-socket connector: train/predict/save/load/model |
+| [`pkg/mcp/`](pkg/mcp) | MCP stdio connector (same core) for AI agents |
 | [`example/`](example) | runnable demos (library embed, validation harness, model roundtrip) |
 | [`build/grove`](build/grove) | cross-compile + package the CLI |
 
