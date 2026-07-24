@@ -16,11 +16,11 @@ y []float64 ──────────────────────�
                               │
         for round in Rounds:
           for class c in K:
-            gradients(raw, y, c) ─▶ g[i], h[i]         (logistic or softmax deriv.)
+            gradients(raw, y, c) ─▶ g[i], h[i]         (logistic / softmax / squared-error)
             buildTree(bt, edges, g, h, idx) ─▶ tree    (histogram split finding)
             raw[i][c] += tree.predict(X[i])            (add the correction)
                               │
-        Model{Base, Rounds:[][]tree} ─▶ Predict / PredictClass / Importance
+        Model{Base, Rounds:[][]tree} ─▶ Predict / PredictClass / PredictValue / Importance
 ```
 
 ## Binning (`bins.go`)
@@ -119,8 +119,8 @@ level by histogram subtraction.
 
 | Tier | Size | Footprint | Fit |
 |---|---|---|---|
-| **Comfortable** | ≤ ~1M rows × ~50–100 feat (n·d ≲ 10⁸) | a few GB | seconds–a minute |
-| **Large** (where float32 would help) | ~1M–10M rows × 100+ feat (n·d ~ 10⁸–10⁹) | 5–40 GB, dominated by float64 `X` | minutes; strains RAM |
+| **Comfortable** | ≤ ~1M rows × ~50–100 feat (n·d ≲ 10⁸) | ≲ 1 GB | seconds–a minute |
+| **Large** (where float32 would help) | ~1M–10M rows × 100+ feat (n·d ≳ 10⁸) | ~1–40 GB, dominated by float64 `X` | minutes; strains RAM |
 | **Beyond grove** | > ~10M rows / tens of GB | exceeds RAM | out-of-core / distributed (XGBoost/LightGBM) |
 
 So `float32` (halving `X`) and an out-of-core/mmap loader only start paying off

@@ -125,10 +125,22 @@ func (s *Server) Predict(req PredictRequest) (PredictResponse, error) {
 		resp.Labels = make([]string, len(req.Features))
 	}
 	for i, x := range req.Features {
-		c := m.PredictClass(x)
+		dist := m.Predict(x) // one ensemble pass; derive the class from it
+		resp.Probabilities[i] = dist
+		c := 0
+		if m.NumClass == 1 {
+			if dist[0] >= 0.5 {
+				c = 1
+			}
+		} else {
+			for k := 1; k < len(dist); k++ {
+				if dist[k] > dist[c] {
+					c = k
+				}
+			}
+		}
 		resp.Classes[i] = c
-		resp.Probabilities[i] = m.Predict(x)
-		if named && c >= 0 && c < len(m.Classes) {
+		if named && c < len(m.Classes) {
 			resp.Labels[i] = m.Classes[c]
 		}
 	}
@@ -221,49 +233,47 @@ func (s *Server) path(name string) (string, error) {
 
 // ---- HTTP handler (also serves over a unix socket) --------------------------
 
-// Handler returns the HTTP mux. Mount it on a TCP or unix listener.
+// Handler returns the HTTP mux. Mount it on a TCP or unix listener. It has no
+// authentication — bind it to loopback or a unix socket, or front it with a
+// proxy that authenticates.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /train", s.hTrain)
-	mux.HandleFunc("POST /predict", s.hPredict)
+	mux.HandleFunc("POST /train", post(s.Train, http.StatusBadRequest))
+	mux.HandleFunc("POST /predict", post(s.Predict, http.StatusConflict))
 	mux.HandleFunc("POST /save", s.hSave)
 	mux.HandleFunc("POST /load", s.hLoad)
 	mux.HandleFunc("GET /model", s.hInfo)
 	return mux
 }
 
-func (s *Server) hTrain(w http.ResponseWriter, r *http.Request) {
-	var req TrainRequest
-	if !decode(w, r, &req) {
-		return
+// post decodes a JSON body of type Req, calls a core method, and writes its
+// response — the shared shape of the body-taking handlers.
+func post[Req, Resp any](fn func(Req) (Resp, error), errCode int) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		var req Req
+		if !decode(w, r, &req) {
+			return
+		}
+		resp, err := fn(req)
+		if err != nil {
+			writeErr(w, errCode, err)
+			return
+		}
+		writeJSON(w, resp)
 	}
-	resp, err := s.Train(req)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, err)
-		return
-	}
-	writeJSON(w, resp)
-}
-
-func (s *Server) hPredict(w http.ResponseWriter, r *http.Request) {
-	var req PredictRequest
-	if !decode(w, r, &req) {
-		return
-	}
-	resp, err := s.Predict(req)
-	if err != nil {
-		writeErr(w, http.StatusConflict, err)
-		return
-	}
-	writeJSON(w, resp)
 }
 
 func (s *Server) hSave(w http.ResponseWriter, r *http.Request) {
-	if err := s.Save(r.URL.Query().Get("name")); err != nil {
-		writeErr(w, http.StatusBadRequest, err)
+	name := r.URL.Query().Get("name")
+	if err := s.Save(name); err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, errNoModel) {
+			code = http.StatusConflict
+		}
+		writeErr(w, code, err)
 		return
 	}
-	writeJSON(w, map[string]string{"saved": r.URL.Query().Get("name")})
+	writeJSON(w, map[string]string{"saved": name})
 }
 
 func (s *Server) hLoad(w http.ResponseWriter, r *http.Request) {

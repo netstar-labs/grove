@@ -1,14 +1,18 @@
 // Command grove trains and applies gradient-boosted-tree models over any CSV
-// feature matrix (numeric columns + a categorical or numeric target). Three
-// subcommands:
+// feature matrix (numeric columns + a categorical target). Subcommands:
 //
 //	grove train   -in data.csv -target type [-ignore source,rule_score] -out model.json
 //	grove predict -model model.json -in data.csv
 //	grove eval    -model model.json -in data.csv -target type
+//	grove serve   -http 127.0.0.1:8080 [-unix /run/grove.sock] -dir models
+//	grove mcp     -dir models
+//	grove version
 //
-// train auto-selects binary (2 classes) or multiclass (>2). Non-feature columns
-// are dropped with -ignore; the remaining numeric columns are the features, and
-// their names are stored in the model so predict/eval align columns by name.
+// The CSV path (train/predict/eval) is classification: train auto-selects binary
+// (2 classes) or multiclass (>2). Non-feature columns are dropped with -ignore;
+// the remaining numeric columns are the features, and their names are stored in
+// the model so predict/eval align columns by name. Regression is reached through
+// the library or the serve/mcp connectors.
 package main
 
 import (
@@ -70,7 +74,7 @@ func usage() {
 // /save, /load and GET /model over the shared serve core.
 func serveCmd(args []string) error {
 	fs := flagset("serve")
-	httpAddr := fs.String("http", ":8080", "HTTP listen address (empty to disable)")
+	httpAddr := fs.String("http", "127.0.0.1:8080", "HTTP listen address (loopback by default — it has no auth; use :8080 to expose)")
 	unixPath := fs.String("unix", "", "unix socket path (empty to disable)")
 	dir := fs.String("dir", "models", "model save/load directory")
 	fs.Parse(args)

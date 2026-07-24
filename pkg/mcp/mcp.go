@@ -38,7 +38,9 @@ type rpcErr struct {
 	Message string `json:"message"`
 }
 
-// Serve runs the JSON-RPC loop until in is exhausted.
+// Serve runs the JSON-RPC loop until in is exhausted. The transport is local
+// stdio (a trusted host launches the server), so inputs are not size-capped the
+// way the network-facing HTTP body is.
 func (s *Server) Serve(in io.Reader, out io.Writer) error {
 	dec := json.NewDecoder(in)
 	enc := json.NewEncoder(out)
@@ -94,15 +96,11 @@ func (s *Server) callTool(req *rpcReq) rpcResp {
 	var err error
 	switch call.Name {
 	case "grove_train":
-		var tr serve.TrainRequest
-		if err = json.Unmarshal(call.Arguments, &tr); err == nil {
-			payload, err = s.core.Train(tr)
-		}
+		payload, err = bind(call.Arguments, s.core.Train)
 	case "grove_predict":
-		var pr serve.PredictRequest
-		if err = json.Unmarshal(call.Arguments, &pr); err == nil {
-			payload, err = s.core.Predict(pr)
-		}
+		payload, err = bind(call.Arguments, s.core.Predict)
+	case "grove_load":
+		payload, err = bind(call.Arguments, s.core.Load)
 	case "grove_save":
 		var a struct {
 			Name string `json:"name"`
@@ -111,13 +109,6 @@ func (s *Server) callTool(req *rpcReq) rpcResp {
 			if err = s.core.Save(a.Name); err == nil {
 				payload = map[string]string{"saved": a.Name}
 			}
-		}
-	case "grove_load":
-		var a struct {
-			Name string `json:"name"`
-		}
-		if err = json.Unmarshal(call.Arguments, &a); err == nil {
-			payload, err = s.core.Load(a.Name)
 		}
 	case "grove_model_info":
 		payload, err = s.core.Info()
@@ -130,6 +121,16 @@ func (s *Server) callTool(req *rpcReq) rpcResp {
 	}
 	body, _ := json.Marshal(payload)
 	return result(req.ID, toolText(string(body), false))
+}
+
+// bind unmarshals a tool's arguments into Req and calls the core method — the
+// shared shape of the request-taking tool arms.
+func bind[Req, Resp any](raw json.RawMessage, fn func(Req) (Resp, error)) (any, error) {
+	var req Req
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return nil, err
+	}
+	return fn(req)
 }
 
 // toolText wraps a string as an MCP tool result content block.

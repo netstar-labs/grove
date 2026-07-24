@@ -30,7 +30,7 @@ func trainData(n int) ([][]float64, []float64) {
 }
 
 // post is a tiny JSON HTTP helper against a handler.
-func post(t *testing.T, h http.Handler, method, path string, body any) (*httptest.ResponseRecorder, map[string]any) {
+func hreq(t *testing.T, h http.Handler, method, path string, body any) (*httptest.ResponseRecorder, map[string]any) {
 	t.Helper()
 	var buf bytes.Buffer
 	if body != nil {
@@ -52,7 +52,7 @@ func TestConnectorFlow(t *testing.T) {
 
 	// 1. receive raw data → train → save (server A)
 	a := New(dir).Handler()
-	w, out := post(t, a, "POST", "/train", TrainRequest{
+	w, out := hreq(t, a, "POST", "/train", TrainRequest{
 		Params:   grove.Params{Objective: grove.Multiclass, NumClass: 3, Rounds: 80, MaxDepth: 4},
 		Features: X, Labels: y,
 		Classes: []string{"low", "mid", "high"},
@@ -67,12 +67,12 @@ func TestConnectorFlow(t *testing.T) {
 
 	// 2. reload into a FRESH server (proves save/load round-trips through disk)
 	b := New(dir).Handler()
-	if w, out := post(t, b, "POST", "/load?name=demo", nil); w.Code != 200 || out["num_class"].(float64) != 3 {
+	if w, out := hreq(t, b, "POST", "/load?name=demo", nil); w.Code != 200 || out["num_class"].(float64) != 3 {
 		t.Fatalf("load: %d %v", w.Code, out)
 	}
 
 	// 3. predict on the reloaded model → model response with class labels
-	w, _ = post(t, b, "POST", "/predict", PredictRequest{Features: [][]float64{
+	w, _ = hreq(t, b, "POST", "/predict", PredictRequest{Features: [][]float64{
 		{0.1, 0.5, 0.5}, // low
 		{0.5, 0.5, 0.5}, // mid
 		{0.9, 0.5, 0.5}, // high
@@ -87,7 +87,7 @@ func TestConnectorFlow(t *testing.T) {
 	}
 
 	// 4. GET /model metadata
-	if w, out := post(t, b, "GET", "/model", nil); w.Code != 200 || out["num_feature"].(float64) != 3 {
+	if w, out := hreq(t, b, "GET", "/model", nil); w.Code != 200 || out["num_feature"].(float64) != 3 {
 		t.Fatalf("model info: %d %v", w.Code, out)
 	}
 }
@@ -95,11 +95,11 @@ func TestConnectorFlow(t *testing.T) {
 func TestConnectorErrors(t *testing.T) {
 	h := New(t.TempDir()).Handler()
 	// predict with no model loaded → 409
-	if w, _ := post(t, h, "POST", "/predict", PredictRequest{Features: [][]float64{{1, 2}}}); w.Code != http.StatusConflict {
+	if w, _ := hreq(t, h, "POST", "/predict", PredictRequest{Features: [][]float64{{1, 2}}}); w.Code != http.StatusConflict {
 		t.Errorf("predict-no-model code = %d, want 409", w.Code)
 	}
 	// load a missing model → 404
-	if w, _ := post(t, h, "POST", "/load?name=nope", nil); w.Code != http.StatusNotFound {
+	if w, _ := hreq(t, h, "POST", "/load?name=nope", nil); w.Code != http.StatusNotFound {
 		t.Errorf("load-missing code = %d, want 404", w.Code)
 	}
 	// path-traversal model name rejected

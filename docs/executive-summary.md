@@ -1,9 +1,9 @@
 # grove — executive summary
 
 **What it is.** grove is a self-contained gradient-boosted decision tree (GBDT)
-library written in pure Go, with a small CLI. It learns to classify from a table
-of numeric features — binary (yes/no) or multiclass — and produces a compact,
-inspectable model.
+library written in pure Go, with a small CLI and HTTP/unix/MCP connectors. It
+learns from a table of numeric features — binary or multiclass classification, or
+regression — and produces a compact, inspectable model.
 
 **Why it exists.** The best GBDT engines (XGBoost, LightGBM) are C++ with Python
 front-ends. They're excellent for offline training but awkward to *deploy*:
@@ -16,12 +16,13 @@ model fit offline drops onto any host — including a locked-down, no-outbound b
 
 **Where it fits.** grove is the model stage of a detection or scoring pipeline: a
 feature extractor produces a CSV of numeric features per record, grove turns that
-into a classifier (or regressor), and the trained model scores new records inline
-— beside, or in place of, a hand-written rule score. Any numeric CSV with a
-categorical or numeric target works.
+into a classifier, and the trained model scores new records inline — beside, or in
+place of, a hand-written rule score. The CSV/CLI path is classification; regression
+is available through the library and the connectors.
 
 **What you get.**
-- Binary (logistic) and multiclass (softmax) classification.
+- Binary (logistic), multiclass (softmax), and regression (squared-error) objectives.
+- Early stopping, missing-value handling, and HTTP/unix/MCP connectors.
 - Histogram-based training that's fast enough for corpora that fit in memory.
 - A JSON model you can serialize, embed, diff, and read.
 - **Interpretability by default** — per-feature gain importance, so every model

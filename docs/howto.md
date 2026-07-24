@@ -100,8 +100,12 @@ One model server; three transports over the same core.
 ### HTTP (or unix socket)
 
 ```sh
-grove serve -http :8080 -dir models         # add -unix /run/grove.sock to also serve there
+grove serve -http 127.0.0.1:8080 -dir models   # loopback by default; add -unix /run/grove.sock too
 ```
+
+> The server has **no authentication**. It defaults to loopback; keep it on
+> loopback or a unix socket, or front it with a proxy that authenticates before
+> exposing it (`-http :8080` binds all interfaces).
 
 ```sh
 # receive raw data → train → save
@@ -143,8 +147,8 @@ subtraction).
 
 | Tier | Size | Footprint | Notes |
 |---|---|---|---|
-| Comfortable | ≤ ~1M rows × ~50–100 feat (n·d ≲ 10⁸) | a few GB | seconds–a minute |
-| Large (float32 would help) | ~1M–10M rows × 100+ feat (n·d ~ 10⁸–10⁹) | 5–40 GB | minutes; strains RAM |
+| Comfortable | ≤ ~1M rows × ~50–100 feat (n·d ≲ 10⁸) | ≲ 1 GB | seconds–a minute |
+| Large (float32 would help) | ~1M–10M rows × 100+ feat (n·d ≳ 10⁸) | ~1–40 GB | minutes; strains RAM |
 | Beyond grove | > ~10M rows / tens of GB | > RAM | use out-of-core / a distributed engine |
 
 See [architecture.md](architecture.md#scale) for the memory model.
