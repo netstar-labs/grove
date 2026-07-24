@@ -47,10 +47,14 @@ func (m *Model) rawBinary(x []float64) float64 {
 	return s
 }
 
-// Predict returns calibrated probabilities: a single P(class=1) for Binary, or a
-// NumClass-length distribution for Multiclass. A feature vector shorter than
-// NumFeature yields a neutral prediction rather than a panic.
+// Predict returns calibrated probabilities: a single P(class=1) for Binary, a
+// NumClass-length distribution for Multiclass, or the raw predicted value in a
+// 1-slice for Regression. A feature vector shorter than NumFeature yields a
+// neutral prediction rather than a panic.
 func (m *Model) Predict(x []float64) []float64 {
+	if m.Objective == Regression {
+		return []float64{m.PredictValue(x)}
+	}
 	if len(x) < m.NumFeature {
 		return neutral(m.NumClass)
 	}
@@ -60,6 +64,19 @@ func (m *Model) Predict(x []float64) []float64 {
 	out := make([]float64, m.NumClass)
 	softmax(m.rawScores(x), out)
 	return out
+}
+
+// PredictValue returns the raw predicted target for a Regression model (the
+// ensemble sum without a link function). A short vector falls back to the base
+// (the target mean the model was seeded with).
+func (m *Model) PredictValue(x []float64) float64 {
+	if len(x) < m.NumFeature {
+		if len(m.Base) > 0 {
+			return m.Base[0]
+		}
+		return 0
+	}
+	return m.rawBinary(x)
 }
 
 // neutral is the no-information prediction used when a caller passes too few

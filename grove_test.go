@@ -216,3 +216,42 @@ func TestBatchAndVersion(t *testing.T) {
 		t.Error("a model with a newer version should be rejected")
 	}
 }
+
+func TestRegression(t *testing.T) {
+	// target = 3*x0 + 2*x1^2 - x2, with light noise
+	rng := rand.New(rand.NewSource(40))
+	const n = 3000
+	X := make([][]float64, n)
+	y := make([]float64, n)
+	for i := range X {
+		x := []float64{rng.Float64(), rng.Float64(), rng.Float64(), rng.Float64()}
+		X[i] = x
+		y[i] = 3*x[0] + 2*x[1]*x[1] - x[2] + rng.NormFloat64()*0.05
+	}
+	m, err := Fit(X, y, Params{Objective: Regression, Rounds: 300, MaxDepth: 4, LearningRate: 0.1, EarlyStop: 15})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var se float64
+	const nt = 1000
+	for i := 0; i < nt; i++ {
+		x := []float64{rng.Float64(), rng.Float64(), rng.Float64(), rng.Float64()}
+		truth := 3*x[0] + 2*x[1]*x[1] - x[2]
+		d := m.PredictValue(x) - truth
+		se += d * d
+	}
+	rmse := math.Sqrt(se / nt)
+	if rmse > 0.2 {
+		t.Errorf("regression RMSE %.3f too high", rmse)
+	}
+	var buf bytes.Buffer
+	m.Save(&buf)
+	m2, err := Load(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if math.Abs(m2.Predict(X[0])[0]-m.Predict(X[0])[0]) > 1e-12 {
+		t.Fatal("regression save/load mismatch")
+	}
+	t.Logf("regression RMSE %.3f, %d trees", rmse, m.TreeCount())
+}

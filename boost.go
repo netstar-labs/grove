@@ -21,24 +21,29 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 	d := len(X[0])
 
 	k := 1
-	if p.Objective == Multiclass {
+	switch p.Objective {
+	case Multiclass:
 		k = p.NumClass
 		for _, yi := range y {
 			if yi < 0 || int(yi) >= k {
 				return nil, errors.New("grove: label out of range for NumClass")
 			}
 		}
-	} else {
+	case Binary:
 		for _, yi := range y {
 			if yi != 0 && yi != 1 {
 				return nil, errors.New("grove: binary labels must be 0 or 1")
 			}
 		}
 	}
+	// Regression: y is continuous — no label check.
 
 	bnr := fitBinner(X, p.MaxBins)
 	bt := bnr.transpose(X)
 	base := baseScores(y, k, n)
+	if p.Objective == Regression {
+		base = []float64{meanFloat(y)} // start from the target mean
+	}
 
 	// raw[i] holds the running per-class score for sample i (init to base).
 	raw := make([][]float64, n)
@@ -110,8 +115,14 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 	for round := 0; round < p.Rounds; round++ {
 		trees := make([]tree, k)
 		if k == 1 {
-			for i := range raw {
-				g[i], h[i] = gradHess(sigmoid(raw[i][0]), y[i])
+			if p.Objective == Regression {
+				for i := range raw {
+					g[i], h[i] = raw[i][0]-y[i], 1 // squared error: g=pred−y, h=1
+				}
+			} else {
+				for i := range raw {
+					g[i], h[i] = gradHess(sigmoid(raw[i][0]), y[i])
+				}
 			}
 			t := buildTree(bt, bnr.edges, g, h, sample(), tp)
 			for i := range raw {
@@ -141,7 +152,7 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		m.Rounds = append(m.Rounds, trees)
 
 		if p.EarlyStop > 0 {
-			loss := valLoss(raw, y, valIdx, k)
+			loss := valLoss(raw, y, valIdx, k, p.Objective)
 			if loss < bestLoss-1e-12 {
 				bestLoss, bestRound, since = loss, round, 0
 			} else if since++; since >= p.EarlyStop {
@@ -156,13 +167,31 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 	return m, nil
 }
 
-// valLoss is mean logloss over the held-out indices — the early-stopping metric.
-func valLoss(raw [][]float64, y []float64, idx []int, k int) float64 {
+func meanFloat(y []float64) float64 {
+	if len(y) == 0 {
+		return 0
+	}
+	var s float64
+	for _, v := range y {
+		s += v
+	}
+	return s / float64(len(y))
+}
+
+// valLoss is the mean held-out loss used for early stopping: squared error for
+// Regression, log loss for classification.
+func valLoss(raw [][]float64, y []float64, idx []int, k int, objective string) float64 {
 	if len(idx) == 0 {
 		return 0
 	}
 	var s float64
-	if k == 1 {
+	switch {
+	case objective == Regression:
+		for _, i := range idx {
+			d := raw[i][0] - y[i]
+			s += d * d
+		}
+	case k == 1:
 		for _, i := range idx {
 			p := clamp(sigmoid(raw[i][0]), 1e-15, 1-1e-15)
 			if y[i] == 1 {
@@ -171,7 +200,7 @@ func valLoss(raw [][]float64, y []float64, idx []int, k int) float64 {
 				s -= math.Log(1 - p)
 			}
 		}
-	} else {
+	default:
 		prob := make([]float64, k)
 		for _, i := range idx {
 			softmax(raw[i], prob)

@@ -21,6 +21,7 @@ import (
 const (
 	Binary     = "binary"     // logistic loss over {0,1} labels
 	Multiclass = "multiclass" // softmax over class indices [0, NumClass)
+	Regression = "regression" // squared-error loss over continuous targets
 )
 
 // Params configures a fit. The zero value is not valid; use Default and adjust,
@@ -63,7 +64,7 @@ func (p *Params) fill() error {
 	if p.Objective == "" {
 		p.Objective = Binary
 	}
-	if p.Objective != Binary && p.Objective != Multiclass {
+	if p.Objective != Binary && p.Objective != Multiclass && p.Objective != Regression {
 		return errors.New("grove: unknown objective " + p.Objective)
 	}
 	if p.Objective == Multiclass && p.NumClass < 2 {

@@ -13,8 +13,9 @@ m, err := grove.Fit(X, y, grove.Params{
     LearningRate: 0.2,
 })
 
-prob  := m.Predict(x)       // []float64: {P(1)} for Binary, distribution for Multiclass
-class := m.PredictClass(x)  // int argmax
+prob  := m.Predict(x)       // []float64: {P(1)} Binary, distribution Multiclass, {value} Regression
+class := m.PredictClass(x)  // int argmax (classification)
+val   := m.PredictValue(x)  // float64 raw target (Regression)
 imp   := m.Importance()     // []float64 per-feature total split gain
 
 m.Save(w)                   // JSON
@@ -25,7 +26,7 @@ m2, _ := grove.Load(r)
 
 | Field | Default | Meaning |
 |---|---|---|
-| `Objective` | `Binary` | `Binary` (logistic) or `Multiclass` (softmax) |
+| `Objective` | `Binary` | `Binary` (logistic), `Multiclass` (softmax), or `Regression` (squared error) |
 | `NumClass` | — | number of classes (Multiclass only) |
 | `Rounds` | 100 | boosting rounds (Binary: 1 tree/round; Multiclass: `NumClass`/round) |
 | `LearningRate` | 0.1 | shrinkage per tree |
