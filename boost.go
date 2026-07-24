@@ -211,15 +211,7 @@ func valLoss(raw [][]float64, y []float64, idx []int, k int, objective string) f
 	return s / float64(len(idx))
 }
 
-func clampInt(n, lo, hi int) int {
-	if n < lo {
-		return lo
-	}
-	if n > hi {
-		return hi
-	}
-	return n
-}
+func clampInt(n, lo, hi int) int { return max(lo, min(hi, n)) }
 
 // baseScores returns the initial per-class raw score (the constant model) over
 // the training rows idx: the label log-odds for Binary, per-class log-frequency

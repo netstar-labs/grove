@@ -4,6 +4,7 @@ import (
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"maps"
 	"math"
 	"os"
 	"slices"
@@ -12,6 +13,15 @@ import (
 
 	"github.com/netstar-labs/grove"
 )
+
+// distinctSorted returns the sorted set of distinct values in one CSV column.
+func distinctSorted(rows [][]string, col int) []string {
+	set := map[string]bool{}
+	for _, r := range rows {
+		set[r[col]] = true
+	}
+	return slices.Sorted(maps.Keys(set))
+}
 
 func flagset(name string) *flag.FlagSet { return flag.NewFlagSet(name, flag.ExitOnError) }
 

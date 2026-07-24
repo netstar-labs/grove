@@ -111,13 +111,19 @@ func (m *Model) PredictClassProba(x []float64) (int, float64) {
 	}
 	prob := make([]float64, m.NumClass)
 	softmax(m.rawScores(x), prob)
+	best := argmax(prob)
+	return best, prob[best]
+}
+
+// argmax returns the index of the largest element (0 for an empty/one-element slice).
+func argmax(s []float64) int {
 	best := 0
-	for c := 1; c < len(prob); c++ {
-		if prob[c] > prob[best] {
-			best = c
+	for i := 1; i < len(s); i++ {
+		if s[i] > s[best] {
+			best = i
 		}
 	}
-	return best, prob[best]
+	return best
 }
 
 // PredictBatch returns the probability vector for each row of X.
@@ -149,14 +155,7 @@ func (m *Model) PredictClass(x []float64) int {
 		}
 		return 0
 	}
-	raw := m.rawScores(x)
-	best := 0
-	for c := 1; c < len(raw); c++ {
-		if raw[c] > raw[best] {
-			best = c
-		}
-	}
-	return best
+	return argmax(m.rawScores(x))
 }
 
 // Importance returns each feature's total split gain across the ensemble — a

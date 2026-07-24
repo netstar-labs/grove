@@ -74,9 +74,7 @@ type arena struct {
 func newArena(edges [][]float64) *arena {
 	maxNB := 1
 	for _, e := range edges {
-		if nb := len(e) + 2; nb > maxNB { // +1 regular top bin, +1 missing bin
-			maxNB = nb
-		}
+		maxNB = max(maxNB, len(e)+2) // +1 regular top bin, +1 missing bin
 	}
 	d := len(edges)
 	return &arena{d: d, maxNB: maxNB, size: d * maxNB}
@@ -182,8 +180,9 @@ func (b *builder) grow(idx []int, depth int, hg, hh []float64) int {
 	// it from the parent's (shg/shh hold the smaller, lhg/lhh the larger).
 	shg, shh := b.ar.get()
 	lhg, lhh := b.ar.get()
+	rightSmaller := len(right) < len(left)
 	small := left
-	if len(right) < len(left) {
+	if rightSmaller {
 		small = right
 	}
 	b.buildHist(small, shg, shh)
@@ -193,10 +192,10 @@ func (b *builder) grow(idx []int, depth int, hg, hh []float64) int {
 
 	// route the smaller/larger histograms to the correct left/right child.
 	var lIdx, rIdx int
-	if len(right) < len(left) { // smaller == right
+	if rightSmaller {
 		rIdx = b.grow(right, depth+1, shg, shh)
 		lIdx = b.grow(left, depth+1, lhg, lhh)
-	} else { // smaller == left
+	} else {
 		lIdx = b.grow(left, depth+1, shg, shh)
 		rIdx = b.grow(right, depth+1, lhg, lhh)
 	}

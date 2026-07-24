@@ -88,11 +88,7 @@ func train(args []string) error {
 	}
 
 	// encode labels (sorted for determinism)
-	classSet := map[string]bool{}
-	for _, r := range rows {
-		classSet[r[tCol]] = true
-	}
-	classes := slices.Sorted(maps.Keys(classSet))
+	classes := distinctSorted(rows, tCol)
 	classIdx := map[string]int{}
 	for i, c := range classes {
 		classIdx[c] = i
@@ -228,11 +224,7 @@ func eval(args []string) error {
 
 	classes := m.Classes
 	if len(classes) == 0 { // a model loaded without stored class names
-		seen := map[string]bool{}
-		for _, r := range rows {
-			seen[r[tCol]] = true
-		}
-		classes = slices.Sorted(maps.Keys(seen))
+		classes = distinctSorted(rows, tCol)
 	}
 
 	nC := len(classes)
@@ -308,15 +300,7 @@ func probOfClass(m *grove.Model, dist []float64, idx int) float64 {
 	return 0
 }
 
-func clampProb(p float64) float64 {
-	if p < 1e-15 {
-		return 1e-15
-	}
-	if p > 1 {
-		return 1
-	}
-	return p
-}
+func clampProb(p float64) float64 { return max(1e-15, min(1, p)) }
 
 func ratio(a, b int) float64 {
 	if b == 0 {

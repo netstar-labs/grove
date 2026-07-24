@@ -40,7 +40,7 @@ func fitBinner(X [][]float64, maxBins int) *binner {
 // quantileEdges returns up to maxBins-1 ascending split points for one column.
 // A constant column yields no edges (a single bin).
 func quantileEdges(col []float64, maxBins int) []float64 {
-	vals := append([]float64(nil), col...)
+	vals := slices.Clone(col)
 	sort.Float64s(vals)
 	uniq := slices.Compact(vals) // sorted, so this is a full de-dup in place
 	if len(uniq) <= 1 {
