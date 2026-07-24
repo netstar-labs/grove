@@ -63,3 +63,7 @@ grove eval    -model model.json -in data.csv -target type
 - Go module `github.com/netstar-labs/grove` (Go 1.26), **standard library only**.
 - Deterministic: a fit with a fixed `Seed` reproduces exactly.
 - Build standalone with `GOWORK=off go build ./...`.
+
+## License
+
+GPL-3.0 — see [LICENSE](LICENSE).
