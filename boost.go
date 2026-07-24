@@ -47,6 +47,7 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 	}
 
 	m := &Model{
+		Version:      modelVersion,
 		Objective:    p.Objective,
 		NumClass:     k,
 		NumFeature:   d,

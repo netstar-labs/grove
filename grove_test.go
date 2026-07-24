@@ -195,3 +195,24 @@ func TestEarlyStopping(t *testing.T) {
 	}
 	t.Logf("early stop kept %d/500 rounds, test acc %.3f", es.TreeCount(), accuracy(es, Xte, yte))
 }
+
+func TestBatchAndVersion(t *testing.T) {
+	X, y := genXOR(1000, 30)
+	m, _ := Fit(X, y, Params{Objective: Binary, Rounds: 30, MaxDepth: 3})
+	if m.Version != modelVersion {
+		t.Errorf("Version = %d, want %d", m.Version, modelVersion)
+	}
+	pc := m.PredictClassBatch(X[:50])
+	pb := m.PredictBatch(X[:50])
+	for i := 0; i < 50; i++ {
+		if pc[i] != m.PredictClass(X[i]) || pb[i][0] != m.Predict(X[i])[0] {
+			t.Fatalf("batch prediction disagrees with single at row %d", i)
+		}
+	}
+	var buf bytes.Buffer
+	m.Save(&buf)
+	future := bytes.Replace(buf.Bytes(), []byte(`"version": 1`), []byte(`"version": 99`), 1)
+	if _, err := Load(bytes.NewReader(future)); err == nil {
+		t.Error("a model with a newer version should be rejected")
+	}
+}

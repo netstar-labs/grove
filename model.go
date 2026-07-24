@@ -7,10 +7,15 @@ import (
 	"io"
 )
 
+// modelVersion is the on-disk model schema version. Load rejects anything newer
+// so a future format can't be silently mis-read by an older binary.
+const modelVersion = 1
+
 // Model is a trained ensemble: a base score per class plus a list of boosting
 // rounds, each holding one tree per class (one tree per round for Binary). It is
 // pure data — safe to serialize, embed, and score without the training code.
 type Model struct {
+	Version      int       `json:"version"`
 	Objective    string    `json:"objective"`
 	NumClass     int       `json:"num_class"` // 1 for Binary
 	NumFeature   int       `json:"num_feature"`
@@ -92,6 +97,24 @@ func (m *Model) PredictClassProba(x []float64) (int, float64) {
 	return best, prob[best]
 }
 
+// PredictBatch returns the probability vector for each row of X.
+func (m *Model) PredictBatch(X [][]float64) [][]float64 {
+	out := make([][]float64, len(X))
+	for i, x := range X {
+		out[i] = m.Predict(x)
+	}
+	return out
+}
+
+// PredictClassBatch returns the predicted class index for each row of X.
+func (m *Model) PredictClassBatch(X [][]float64) []int {
+	out := make([]int, len(X))
+	for i, x := range X {
+		out[i] = m.PredictClass(x)
+	}
+	return out
+}
+
 // PredictClass returns the most likely class index (0/1 for Binary).
 func (m *Model) PredictClass(x []float64) int {
 	if len(x) < m.NumFeature {
@@ -156,6 +179,9 @@ func Load(r io.Reader) (*Model, error) {
 
 // validate checks the invariants Predict relies on.
 func (m *Model) validate() error {
+	if m.Version > modelVersion {
+		return fmt.Errorf("grove: model version %d newer than supported %d", m.Version, modelVersion)
+	}
 	if m.NumClass < 1 {
 		return fmt.Errorf("grove: num_class %d < 1", m.NumClass)
 	}
