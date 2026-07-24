@@ -69,11 +69,24 @@ per round; one per round for binary), plus optional feature/class names.
 across the ensemble. Models serialize to compact JSON (`Save`/`Load`) — inspect
 them, embed them, diff them across retrains.
 
+## Parallel split finding
+
+For a large node (≥2048 samples) on a wide feature set (≥16 features), split
+finding fans out across `GOMAXPROCS` workers — each scans a stripe of features
+into its own histogram scratch, and the per-feature bests are reduced **in
+feature order**, so the parallel result is bit-identical to the serial one and
+the fit stays deterministic. Narrow fits and small (deep) nodes stay serial, so
+they never pay the goroutine tax. On 40 features / 10 cores this cuts fit time
+~20%; the shared training data is read-only and result slots are disjoint, so
+the pass is race-free (`go test -race`).
+
 ## Trade-offs
 
 - **Depth-first, exact histograms, no histogram subtraction (yet).** Simple and
-  correct; O(n·d·depth) per tree. Fine for in-memory corpora; the obvious next
-  optimization is parent−sibling histogram subtraction.
+  correct; O(n·d·depth) per tree. Fine for in-memory corpora; the next
+  optimization is parent−sibling histogram subtraction (roughly halves the
+  histogram-building work), and a persistent worker pool to cut per-node
+  goroutine spawns.
 - **`float64` throughout.** Accuracy and simplicity over the memory/speed of
   `float32`.
 - **No missing-value handling.** Features are assumed present (the inbox matrix

@@ -1,6 +1,41 @@
 package grove
 
-import "testing"
+import (
+	"math/rand"
+	"testing"
+)
+
+// genWide is a wide-feature binary problem (label from x0,x1; the rest noise) —
+// the shape where feature-parallel split finding pays off.
+func genWide(n, d int, seed int64) ([][]float64, []float64) {
+	rng := rand.New(rand.NewSource(seed))
+	X := make([][]float64, n)
+	y := make([]float64, n)
+	for i := range X {
+		x := make([]float64, d)
+		for j := range x {
+			x[j] = rng.Float64()
+		}
+		lbl := 0.0
+		if (x[0] > 0.5) != (x[1] > 0.5) {
+			lbl = 1
+		}
+		X[i], y[i] = x, lbl
+	}
+	return X, y
+}
+
+// BenchmarkFitWide exercises the parallel path; compare -cpu 1 (serial) vs
+// -cpu 10 to see the split-finding speedup: go test -bench FitWide -cpu 1,10.
+func BenchmarkFitWide(b *testing.B) {
+	X, y := genWide(5000, 40, 200)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if _, err := Fit(X, y, Params{Objective: Binary, Rounds: 60, MaxDepth: 6, LearningRate: 0.1}); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
 
 func BenchmarkFitBinary(b *testing.B) {
 	X, y := genXOR(5000, 100)
