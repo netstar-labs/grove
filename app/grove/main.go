@@ -16,12 +16,16 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"net"
+	"net/http"
 	"os"
 	"slices"
 	"sort"
 	"strconv"
 
 	"github.com/netstar-labs/grove"
+	"github.com/netstar-labs/grove/pkg/mcp"
+	"github.com/netstar-labs/grove/pkg/serve"
 )
 
 // stamped by build/grove via -ldflags -X.
@@ -42,6 +46,10 @@ func main() {
 		err = predict(os.Args[2:])
 	case "eval":
 		err = eval(os.Args[2:])
+	case "serve":
+		err = serveCmd(os.Args[2:])
+	case "mcp":
+		err = mcpCmd(os.Args[2:])
 	case "version", "-version", "--version":
 		fmt.Printf("grove %s (%s)\n", version, build)
 	default:
@@ -54,8 +62,47 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: grove <train|predict|eval> [flags]  (see -h on each)")
+	fmt.Fprintln(os.Stderr, "usage: grove <train|predict|eval|serve|mcp|version> [flags]  (see -h on each)")
 	os.Exit(2)
+}
+
+// serveCmd runs the HTTP and/or unix-socket connector: POST /train, /predict,
+// /save, /load and GET /model over the shared serve core.
+func serveCmd(args []string) error {
+	fs := flagset("serve")
+	httpAddr := fs.String("http", ":8080", "HTTP listen address (empty to disable)")
+	unixPath := fs.String("unix", "", "unix socket path (empty to disable)")
+	dir := fs.String("dir", "models", "model save/load directory")
+	fs.Parse(args)
+	if *httpAddr == "" && *unixPath == "" {
+		return fmt.Errorf("serve: enable at least one of -http / -unix")
+	}
+
+	h := serve.New(*dir).Handler()
+	errc := make(chan error, 2)
+	if *unixPath != "" {
+		_ = os.Remove(*unixPath)
+		ln, err := net.Listen("unix", *unixPath)
+		if err != nil {
+			return err
+		}
+		defer ln.Close()
+		fmt.Fprintf(os.Stderr, "grove: serving on unix %s (models: %s)\n", *unixPath, *dir)
+		go func() { errc <- http.Serve(ln, h) }()
+	}
+	if *httpAddr != "" {
+		fmt.Fprintf(os.Stderr, "grove: serving on http %s (models: %s)\n", *httpAddr, *dir)
+		go func() { errc <- http.ListenAndServe(*httpAddr, h) }()
+	}
+	return <-errc
+}
+
+// mcpCmd runs the MCP stdio connector for AI agents.
+func mcpCmd(args []string) error {
+	fs := flagset("mcp")
+	dir := fs.String("dir", "models", "model save/load directory")
+	fs.Parse(args)
+	return mcp.New(*dir).Serve(os.Stdin, os.Stdout)
 }
 
 // ---- train -----------------------------------------------------------------
