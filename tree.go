@@ -9,13 +9,14 @@ import (
 // "feature <= threshold" (left) or otherwise (right); leaves carry a weight.
 // The compact JSON tags keep serialized ensembles small.
 type node struct {
-	Leaf      bool    `json:"leaf,omitempty"`
-	Feature   int     `json:"f,omitempty"`
-	Threshold float64 `json:"t,omitempty"`
-	Left      int     `json:"l,omitempty"`
-	Right     int     `json:"r,omitempty"`
-	Value     float64 `json:"v,omitempty"`
-	Gain      float64 `json:"g,omitempty"` // split gain, for feature importance
+	Leaf        bool    `json:"leaf,omitempty"`
+	Feature     int     `json:"f,omitempty"`
+	Threshold   float64 `json:"t,omitempty"`
+	Left        int     `json:"l,omitempty"`
+	Right       int     `json:"r,omitempty"`
+	Value       float64 `json:"v,omitempty"`
+	Gain        float64 `json:"g,omitempty"`  // split gain, for feature importance
+	DefaultLeft bool    `json:"dl,omitempty"` // route missing (NaN) features left
 }
 
 // tree is a flat, index-linked node array. Node 0 is the root.
@@ -24,13 +25,20 @@ type tree struct {
 }
 
 // predict routes a raw feature vector to its leaf and returns the leaf weight.
+// A missing feature (NaN) follows the node's learned default direction.
 func (t *tree) predict(x []float64) float64 {
 	i := 0
 	for !t.Nodes[i].Leaf {
-		if x[t.Nodes[i].Feature] <= t.Nodes[i].Threshold {
-			i = t.Nodes[i].Left
+		n := &t.Nodes[i]
+		v := x[n.Feature]
+		goLeft := n.DefaultLeft
+		if v == v { // not NaN
+			goLeft = v <= n.Threshold
+		}
+		if goLeft {
+			i = n.Left
 		} else {
-			i = t.Nodes[i].Right
+			i = n.Right
 		}
 	}
 	return t.Nodes[i].Value
@@ -66,7 +74,7 @@ type arena struct {
 func newArena(edges [][]float64) *arena {
 	maxNB := 1
 	for _, e := range edges {
-		if nb := len(e) + 1; nb > maxNB {
+		if nb := len(e) + 2; nb > maxNB { // +1 regular top bin, +1 missing bin
 			maxNB = nb
 		}
 	}
@@ -147,7 +155,7 @@ func (b *builder) grow(idx []int, depth int, hg, hh []float64) int {
 		return leaf()
 	}
 
-	bestF, bestBin, bestGain := b.bestSplit(hg, hh, G, H)
+	bestF, bestBin, bestGain, defaultLeft := b.bestSplit(hg, hh, G, H)
 	if bestF < 0 {
 		return leaf()
 	}
@@ -185,11 +193,12 @@ func (b *builder) grow(idx []int, depth int, hg, hh []float64) int {
 		rIdx = b.grow(right, depth+1, lhg, lhh)
 	}
 	b.t.Nodes[self] = node{
-		Feature:   bestF,
-		Threshold: b.edges[bestF][bestBin],
-		Left:      lIdx,
-		Right:     rIdx,
-		Gain:      bestGain,
+		Feature:     bestF,
+		Threshold:   b.edges[bestF][bestBin],
+		Left:        lIdx,
+		Right:       rIdx,
+		Gain:        bestGain,
+		DefaultLeft: defaultLeft,
 	}
 	return self
 }
@@ -243,29 +252,44 @@ func subInto(dst, a, b []float64) {
 }
 
 // bestSplit scans the node's pre-built histograms for the (feature, bin)
-// maximizing the regularized gain. Cheap (O(d·maxNB)) since the histograms are
-// already built, so it stays serial; the cost was the fill, now parallel.
-func (b *builder) bestSplit(hg, hh []float64, G, H float64) (bestF, bestBin int, bestGain float64) {
-	bestF, bestBin, bestGain = -1, 0, b.p.gamma
+// maximizing the regularized gain, and the direction missing values should take.
+// Cheap (O(d·maxNB)) since the histograms are already built, so it stays serial;
+// the cost was the fill, now parallel. G/H are the node totals (they include the
+// missing bin), so for each split point it tries routing the missing mass to
+// each side and keeps the better. With no missing samples both are equal, so a
+// clean dataset yields the same split as if the feature had no missing bin.
+func (b *builder) bestSplit(hg, hh []float64, G, H float64) (bestF, bestBin int, bestGain float64, defaultLeft bool) {
+	bestF, bestBin, bestGain, defaultLeft = -1, 0, b.p.gamma, true
 	for f := 0; f < b.ar.d; f++ {
-		nb := len(b.edges[f]) + 1
-		if nb < 2 {
+		nbReg := len(b.edges[f]) + 1 // regular bins 0..nbReg-1
+		if nbReg < 2 {
 			continue
 		}
 		off := f * b.ar.maxNB
+		Gm, Hm := hg[off+nbReg], hh[off+nbReg] // the missing bin
 		var GL, HL float64
-		for bin := 0; bin < nb-1; bin++ {
+		for bin := 0; bin < nbReg-1; bin++ {
 			GL += hg[off+bin]
 			HL += hh[off+bin]
-			GR, HR := G-GL, H-HL
-			if HL < b.p.minChildWeight || HR < b.p.minChildWeight {
-				continue
+			// missing left: regular-left plus the missing mass
+			if g, ok := b.gainOf(GL+Gm, HL+Hm, G, H); ok && g > bestGain {
+				bestF, bestBin, bestGain, defaultLeft = f, bin, g, true
 			}
-			gain := 0.5 * (score(GL, HL, b.p.lambda) + score(GR, HR, b.p.lambda) - score(G, H, b.p.lambda))
-			if gain > bestGain {
-				bestF, bestBin, bestGain = f, bin, gain
+			// missing right: regular-left only (missing falls to the right)
+			if g, ok := b.gainOf(GL, HL, G, H); ok && g > bestGain {
+				bestF, bestBin, bestGain, defaultLeft = f, bin, g, false
 			}
 		}
 	}
 	return
+}
+
+// gainOf is the regularized gain of a split with the given left sums (right is
+// the node total minus left), or ok=false if either child is under-weight.
+func (b *builder) gainOf(GL, HL, G, H float64) (float64, bool) {
+	GR, HR := G-GL, H-HL
+	if HL < b.p.minChildWeight || HR < b.p.minChildWeight {
+		return 0, false
+	}
+	return 0.5 * (score(GL, HL, b.p.lambda) + score(GR, HR, b.p.lambda) - score(G, H, b.p.lambda)), true
 }

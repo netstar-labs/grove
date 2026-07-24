@@ -50,7 +50,7 @@ func Default(objective string, numClass int) Params {
 		Rounds:         100,
 		LearningRate:   0.1,
 		MaxDepth:       6,
-		MaxBins:        256,
+		MaxBins:        255, // one bin reserved for missing values (fits uint8)
 		Lambda:         1,
 		Gamma:          0,
 		MinChildWeight: 1,
@@ -83,8 +83,8 @@ func (p *Params) fill() error {
 	if p.MaxBins < 2 {
 		p.MaxBins = d.MaxBins
 	}
-	if p.MaxBins > 256 {
-		p.MaxBins = 256
+	if p.MaxBins > 255 {
+		p.MaxBins = 255 // reserve bin index for missing values within uint8
 	}
 	// A zero Lambda takes the default like the other knobs; pass a negative
 	// value (clamped to 0) when you want literally no L2 regularization.

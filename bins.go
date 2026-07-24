@@ -1,6 +1,7 @@
 package grove
 
 import (
+	"math"
 	"slices"
 	"sort"
 )
@@ -23,10 +24,13 @@ func fitBinner(X [][]float64, maxBins int) *binner {
 		d = len(X[0])
 	}
 	b := &binner{edges: make([][]float64, d)}
-	col := make([]float64, len(X))
+	col := make([]float64, 0, len(X))
 	for f := 0; f < d; f++ {
+		col = col[:0]
 		for i := range X {
-			col[i] = X[i][f]
+			if v := X[i][f]; !math.IsNaN(v) { // missing values don't shape the bins
+				col = append(col, v)
+			}
 		}
 		b.edges[f] = quantileEdges(col, maxBins)
 	}
@@ -70,9 +74,14 @@ func quantileEdges(col []float64, maxBins int) []float64 {
 func midpoint(a, b float64) float64 { return a + (b-a)/2 }
 
 // binValue returns the bin index of v under feature f: the first bin whose upper
-// edge is >= v, so "bin <= i" is exactly equivalent to "v <= edges[i]".
+// edge is >= v, so "bin <= i" is exactly equivalent to "v <= edges[i]". A missing
+// value (NaN) maps to the dedicated missing bin at index len(edges)+1, one past
+// the last regular bin.
 func (b *binner) binValue(f int, v float64) uint8 {
 	e := b.edges[f]
+	if math.IsNaN(v) {
+		return uint8(len(e) + 1)
+	}
 	i := sort.Search(len(e), func(i int) bool { return v <= e[i] })
 	return uint8(i)
 }

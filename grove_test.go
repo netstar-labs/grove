@@ -255,3 +255,52 @@ func TestRegression(t *testing.T) {
 	}
 	t.Logf("regression RMSE %.3f, %d trees", rmse, m.TreeCount())
 }
+
+func TestMissingValues(t *testing.T) {
+	// x0 decides the class, but ~20% of x0 values are missing (NaN) after the
+	// label is fixed; x1 is noise. The model must learn from present x0, route
+	// missing without panicking, and keep present-row accuracy high.
+	rng := rand.New(rand.NewSource(50))
+	const n = 4000
+	X := make([][]float64, n)
+	y := make([]float64, n)
+	for i := range X {
+		x0 := rng.Float64()
+		lbl := 0.0
+		if x0 > 0.5 {
+			lbl = 1
+		}
+		if rng.Float64() < 0.2 {
+			x0 = math.NaN()
+		}
+		X[i], y[i] = []float64{x0, rng.Float64()}, lbl
+	}
+	m, err := Fit(X, y, Params{Objective: Binary, Rounds: 80, MaxDepth: 3, LearningRate: 0.2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	correct, total := 0, 1000
+	for i := 0; i < total; i++ {
+		x0 := rng.Float64()
+		truth := 0.0
+		if x0 > 0.5 {
+			truth = 1
+		}
+		if float64(m.PredictClass([]float64{x0, rng.Float64()})) == truth {
+			correct++
+		}
+		_ = m.PredictClass([]float64{math.NaN(), rng.Float64()}) // must not panic
+	}
+	if acc := float64(correct) / float64(total); acc < 0.9 {
+		t.Errorf("present-row accuracy %.3f < 0.90", acc)
+	}
+	var buf bytes.Buffer
+	m.Save(&buf)
+	m2, err := Load(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m2.PredictClass([]float64{math.NaN(), 0.5}) != m.PredictClass([]float64{math.NaN(), 0.5}) {
+		t.Fatal("missing-value routing not preserved across save/load")
+	}
+}
