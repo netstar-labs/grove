@@ -1,7 +1,6 @@
 package grove
 
 import (
-	"math"
 	"runtime"
 	"sync"
 )
@@ -46,66 +45,73 @@ type treeParams struct {
 	lr             float64
 }
 
-// Split finding fans out across workers only when it pays: a node needs at
-// least parThreshold samples (below it, goroutine overhead exceeds the
-// histogram work), and the model needs at least minParFeatures features (with
-// few features, per-worker work is too small — narrow fits stay fully serial,
-// so they never pay the concurrency tax).
+// Building a node's histogram fans out across workers only when it pays: at
+// least parThreshold samples (below it, goroutine overhead exceeds the work) and
+// at least minParFeatures features (few features ⇒ per-worker work too small, so
+// narrow fits stay fully serial and never pay the concurrency tax).
 const (
 	parThreshold   = 2048
 	minParFeatures = 16
 )
 
-// splitCand is one feature's best split, filled by a worker and reduced in
-// feature order (so the parallel result is identical to the serial one).
-type splitCand struct {
-	bin  int
-	gain float64
+// arena pools flat per-node histogram buffers (each d*maxNB, one for gradients
+// one for hessians) so histogram subtraction reuses memory across the whole
+// forest instead of allocating per node. One arena is shared across all trees of
+// a fit; the recursion is single-threaded, so the free list needs no lock.
+type arena struct {
+	d, maxNB, size int
+	free           [][2][]float64
 }
 
-// builder grows one tree over a sample-index set using precomputed bins and the
-// current gradients/hessians. Its scratch (per-worker histograms, per-feature
-// results) is allocated once and reused for every node.
-type builder struct {
-	bt       [][]uint8   // feature-major bins
-	edges    [][]float64 // per-feature thresholds (bin -> real value)
-	g, h     []float64   // per-sample gradient and hessian
-	p        treeParams
-	t        *tree
-	nWorkers int
-	hgW, hhW [][]float64 // per-worker histogram scratch [nWorkers][maxBins]
-	res      []splitCand // per-feature best split (reduced in order)
-}
-
-// buildTree grows a single regression tree over the given sample indices,
-// fanning split finding across up to GOMAXPROCS workers on large nodes.
-func buildTree(bt [][]uint8, edges [][]float64, g, h []float64, idx []int, p treeParams) tree {
+func newArena(edges [][]float64) *arena {
 	maxNB := 1
 	for _, e := range edges {
 		if nb := len(e) + 1; nb > maxNB {
 			maxNB = nb
 		}
 	}
+	d := len(edges)
+	return &arena{d: d, maxNB: maxNB, size: d * maxNB}
+}
+
+func (a *arena) get() (hg, hh []float64) {
+	if n := len(a.free); n > 0 {
+		buf := a.free[n-1]
+		a.free = a.free[:n-1]
+		return buf[0], buf[1]
+	}
+	return make([]float64, a.size), make([]float64, a.size)
+}
+
+func (a *arena) put(hg, hh []float64) { a.free = append(a.free, [2][]float64{hg, hh}) }
+
+// builder grows one tree. A node's histogram (feature-major, flat with stride
+// maxNB) is built once; on a split it builds only the smaller child's histogram
+// and derives the larger by subtracting from the parent's — roughly halving the
+// histogram-building work.
+type builder struct {
+	bt       [][]uint8
+	edges    [][]float64
+	g, h     []float64
+	p        treeParams
+	t        *tree
+	ar       *arena
+	nWorkers int
+}
+
+// buildTree grows a single regression tree over idx, taking histogram buffers
+// from the shared arena.
+func buildTree(bt [][]uint8, edges [][]float64, g, h []float64, idx []int, p treeParams, ar *arena) tree {
 	nWorkers := 1
-	if len(edges) >= minParFeatures {
-		if nWorkers = min(runtime.GOMAXPROCS(0), len(edges)); nWorkers < 1 {
+	if ar.d >= minParFeatures {
+		if nWorkers = min(runtime.GOMAXPROCS(0), ar.d); nWorkers < 1 {
 			nWorkers = 1
 		}
 	}
-	b := &builder{
-		bt: bt, edges: edges, g: g, h: h, p: p, t: &tree{},
-		nWorkers: nWorkers,
-		hgW:      make([][]float64, nWorkers),
-		hhW:      make([][]float64, nWorkers),
-	}
-	for w := range b.hgW {
-		b.hgW[w] = make([]float64, maxNB)
-		b.hhW[w] = make([]float64, maxNB)
-	}
-	if nWorkers > 1 {
-		b.res = make([]splitCand, len(edges)) // per-feature results, parallel path only
-	}
-	b.grow(idx, 0)
+	b := &builder{bt: bt, edges: edges, g: g, h: h, p: p, t: &tree{}, ar: ar, nWorkers: nWorkers}
+	hg, hh := ar.get()
+	b.buildHist(idx, hg, hh)
+	b.grow(idx, 0, hg, hh)
 	return *b.t
 }
 
@@ -119,26 +125,31 @@ func (b *builder) leafValue(G, H float64) float64 {
 	return -G / (H + b.p.lambda) * b.p.lr
 }
 
-// grow adds the subtree for sample set idx at the given depth and returns the
-// index of its root node.
-func (b *builder) grow(idx []int, depth int) int {
+// grow adds the subtree for idx (whose histogram is hg/hh) at the given depth,
+// returns its root node index, and returns hg/hh to the arena when done with them.
+func (b *builder) grow(idx []int, depth int, hg, hh []float64) int {
+	// node totals: feature 0 occupies indices [0,maxNB); every sample lands in
+	// one of its bins, so summing that region is the node's (G,H).
 	var G, H float64
-	for _, i := range idx {
-		G += b.g[i]
-		H += b.h[i]
+	for i := 0; i < b.ar.maxNB; i++ {
+		G += hg[i]
+		H += hh[i]
 	}
 	self := len(b.t.Nodes)
 	b.t.Nodes = append(b.t.Nodes, node{}) // reserve; filled below
 
-	if depth >= b.p.maxDepth || len(idx) < 2 {
+	leaf := func() int {
 		b.t.Nodes[self] = node{Leaf: true, Value: b.leafValue(G, H)}
+		b.ar.put(hg, hh)
 		return self
 	}
+	if depth >= b.p.maxDepth || len(idx) < 2 {
+		return leaf()
+	}
 
-	bestF, bestBin, bestGain := b.bestSplit(idx, G, H)
+	bestF, bestBin, bestGain := b.bestSplit(hg, hh, G, H)
 	if bestF < 0 {
-		b.t.Nodes[self] = node{Leaf: true, Value: b.leafValue(G, H)}
-		return self
+		return leaf()
 	}
 
 	left := make([]int, 0, len(idx))
@@ -150,91 +161,111 @@ func (b *builder) grow(idx []int, depth int) int {
 			right = append(right, i)
 		}
 	}
-	l := b.grow(left, depth+1)
-	r := b.grow(right, depth+1)
+
+	// build only the smaller child's histogram; derive the larger by subtracting
+	// it from the parent's (shg/shh hold the smaller, lhg/lhh the larger).
+	shg, shh := b.ar.get()
+	lhg, lhh := b.ar.get()
+	small := left
+	if len(right) < len(left) {
+		small = right
+	}
+	b.buildHist(small, shg, shh)
+	subInto(lhg, hg, shg)
+	subInto(lhh, hh, shh)
+	b.ar.put(hg, hh) // parent histogram no longer needed
+
+	// route the smaller/larger histograms to the correct left/right child.
+	var lIdx, rIdx int
+	if len(right) < len(left) { // smaller == right
+		rIdx = b.grow(right, depth+1, shg, shh)
+		lIdx = b.grow(left, depth+1, lhg, lhh)
+	} else { // smaller == left
+		lIdx = b.grow(left, depth+1, shg, shh)
+		rIdx = b.grow(right, depth+1, lhg, lhh)
+	}
 	b.t.Nodes[self] = node{
 		Feature:   bestF,
 		Threshold: b.edges[bestF][bestBin],
-		Left:      l,
-		Right:     r,
+		Left:      lIdx,
+		Right:     rIdx,
 		Gain:      bestGain,
 	}
 	return self
 }
 
-// bestSplit finds the (feature, bin) maximizing gain over idx. Large nodes fan
-// out across workers, each scanning a stripe of features into its own scratch;
-// the per-feature bests are then reduced in feature order, so the parallel and
-// serial results are identical (and the reduction is deterministic).
-func (b *builder) bestSplit(idx []int, G, H float64) (bestF, bestBin int, bestGain float64) {
-	bestF, bestBin, bestGain = -1, 0, b.p.gamma
-	d := len(b.bt)
-
+// buildHist accumulates the (gradient, hessian) histogram of idx into hg/hh
+// (feature-major, stride maxNB), clearing them first. Large nodes on wide
+// feature sets fan out across workers, each owning a disjoint stripe of features
+// — and therefore disjoint index ranges of hg/hh — so the fill is race-free.
+func (b *builder) buildHist(idx []int, hg, hh []float64) {
+	clear(hg)
+	clear(hh)
 	if b.nWorkers <= 1 || len(idx) < parThreshold {
-		for f := 0; f < d; f++ {
-			bin, gain := b.featureBest(f, idx, G, H, b.hgW[0], b.hhW[0])
-			if gain > bestGain {
-				bestF, bestBin, bestGain = f, bin, gain
-			}
+		for f := 0; f < b.ar.d; f++ {
+			b.fillFeature(f, idx, hg, hh)
 		}
 		return
 	}
-
 	var wg sync.WaitGroup
-	chunk := (d + b.nWorkers - 1) / b.nWorkers
+	chunk := (b.ar.d + b.nWorkers - 1) / b.nWorkers
 	for w := 0; w < b.nWorkers; w++ {
-		lo, hi := w*chunk, min((w+1)*chunk, d)
+		lo, hi := w*chunk, min((w+1)*chunk, b.ar.d)
 		if lo >= hi {
 			break
 		}
 		wg.Add(1)
-		go func(w, lo, hi int) {
+		go func(lo, hi int) {
 			defer wg.Done()
 			for f := lo; f < hi; f++ {
-				bin, gain := b.featureBest(f, idx, G, H, b.hgW[w], b.hhW[w])
-				b.res[f] = splitCand{bin, gain}
+				b.fillFeature(f, idx, hg, hh)
 			}
-		}(w, lo, hi)
+		}(lo, hi)
 	}
 	wg.Wait()
-
-	for f := 0; f < d; f++ {
-		if b.res[f].gain > bestGain {
-			bestF, bestBin, bestGain = f, b.res[f].bin, b.res[f].gain
-		}
-	}
-	return
 }
 
-// featureBest builds feature f's gradient/hessian histogram over idx (into the
-// caller's scratch) and returns its best split bin and gain (gain −Inf if the
-// feature can't split).
-func (b *builder) featureBest(f int, idx []int, G, H float64, hg, hh []float64) (int, float64) {
-	nb := len(b.edges[f]) + 1
-	if nb < 2 {
-		return 0, math.Inf(-1)
-	}
-	hg, hh = hg[:nb], hh[:nb]
-	clear(hg)
-	clear(hh)
+func (b *builder) fillFeature(f int, idx []int, hg, hh []float64) {
+	off := f * b.ar.maxNB
+	col := b.bt[f]
 	for _, i := range idx {
-		bin := b.bt[f][i]
+		bin := off + int(col[i])
 		hg[bin] += b.g[i]
 		hh[bin] += b.h[i]
 	}
-	bestBin, bestGain := 0, math.Inf(-1)
-	var GL, HL float64
-	for bin := 0; bin < nb-1; bin++ {
-		GL += hg[bin]
-		HL += hh[bin]
-		GR, HR := G-GL, H-HL
-		if HL < b.p.minChildWeight || HR < b.p.minChildWeight {
+}
+
+// subInto sets dst = a - b element-wise (the larger child's histogram).
+func subInto(dst, a, b []float64) {
+	for i := range dst {
+		dst[i] = a[i] - b[i]
+	}
+}
+
+// bestSplit scans the node's pre-built histograms for the (feature, bin)
+// maximizing the regularized gain. Cheap (O(d·maxNB)) since the histograms are
+// already built, so it stays serial; the cost was the fill, now parallel.
+func (b *builder) bestSplit(hg, hh []float64, G, H float64) (bestF, bestBin int, bestGain float64) {
+	bestF, bestBin, bestGain = -1, 0, b.p.gamma
+	for f := 0; f < b.ar.d; f++ {
+		nb := len(b.edges[f]) + 1
+		if nb < 2 {
 			continue
 		}
-		gain := 0.5 * (score(GL, HL, b.p.lambda) + score(GR, HR, b.p.lambda) - score(G, H, b.p.lambda))
-		if gain > bestGain {
-			bestBin, bestGain = bin, gain
+		off := f * b.ar.maxNB
+		var GL, HL float64
+		for bin := 0; bin < nb-1; bin++ {
+			GL += hg[off+bin]
+			HL += hh[off+bin]
+			GR, HR := G-GL, H-HL
+			if HL < b.p.minChildWeight || HR < b.p.minChildWeight {
+				continue
+			}
+			gain := 0.5 * (score(GL, HL, b.p.lambda) + score(GR, HR, b.p.lambda) - score(G, H, b.p.lambda))
+			if gain > bestGain {
+				bestF, bestBin, bestGain = f, bin, gain
+			}
 		}
 	}
-	return bestBin, bestGain
+	return
 }

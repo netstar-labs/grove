@@ -36,10 +36,10 @@ feature's histogram is a linear, cache-friendly pass.
 
 ## Tree growth (`tree.go`)
 
-Each tree is grown depth-first to `MaxDepth`. At a node, for every feature we
-accumulate a per-bin histogram of gradients and hessians over the node's samples,
-then scan bins left→right tracking the cumulative left sum; the best split
-maximizes the regularized gain
+Each tree is grown depth-first to `MaxDepth`. A node's histogram — per-feature,
+per-bin sums of gradients and hessians, stored as one flat array with stride
+`maxBins` — is built once; the best split is found by scanning it left→right
+tracking the cumulative left sum, maximizing the regularized gain
 
 ```
 gain = ½ [ GL²/(HL+λ) + GR²/(HR+λ) − G²/(H+λ) ]
@@ -47,8 +47,18 @@ gain = ½ [ GL²/(HL+λ) + GR²/(HR+λ) − G²/(H+λ) ]
 
 subject to `MinChildWeight` (minimum child hessian) and `Gamma` (minimum gain).
 If no split clears the bar, the node becomes a leaf with the regularized optimal
-weight `−G/(H+λ)`, shrunk by the learning rate. The gain of each chosen split is
-recorded on the node — that's what powers `Importance()`.
+weight `−G/(H+λ)`, shrunk by the learning rate. The gain of each split is recorded
+on the node — that's what powers `Importance()`.
+
+**Histogram subtraction.** On a split, only the *smaller* child's histogram is
+built from its samples; the *larger* child's is derived by subtracting it from
+the parent's (`large = parent − small`). Since the smaller child holds ≤ half the
+samples, this roughly halves the histogram-building work per level. Node
+histograms come from a small **arena** (a free-list of flat buffers) shared
+across the whole forest, so subtraction reuses memory instead of allocating per
+node. (Subtraction introduces floating-point drift versus a fresh build, which
+can flip a near-tie split — accepted, as in the mainstream GBDT engines; fits
+stay deterministic.)
 
 ## Boosting (`boost.go`)
 
@@ -69,24 +79,22 @@ per round; one per round for binary), plus optional feature/class names.
 across the ensemble. Models serialize to compact JSON (`Save`/`Load`) — inspect
 them, embed them, diff them across retrains.
 
-## Parallel split finding
+## Parallel histogram building
 
-For a large node (≥2048 samples) on a wide feature set (≥16 features), split
-finding fans out across `GOMAXPROCS` workers — each scans a stripe of features
-into its own histogram scratch, and the per-feature bests are reduced **in
-feature order**, so the parallel result is bit-identical to the serial one and
-the fit stays deterministic. Narrow fits and small (deep) nodes stay serial, so
-they never pay the goroutine tax. On 40 features / 10 cores this cuts fit time
-~20%; the shared training data is read-only and result slots are disjoint, so
-the pass is race-free (`go test -race`).
+For a large node (≥2048 samples) on a wide feature set (≥16 features), the
+histogram *fill* fans out across `GOMAXPROCS` workers — each owns a disjoint
+stripe of features, and therefore a disjoint index range of the flat histogram,
+so the workers write in parallel with no lock and no race (`go test -race`). The
+result is independent of worker count, so the fit stays deterministic. Narrow
+fits and small (deep) nodes stay serial and never pay the goroutine tax. With
+histogram subtraction already halving the fill work, the parallel path is a
+smaller additional win on top.
 
 ## Trade-offs
 
-- **Depth-first, exact histograms, no histogram subtraction (yet).** Simple and
-  correct; O(n·d·depth) per tree. Fine for in-memory corpora; the next
-  optimization is parent−sibling histogram subtraction (roughly halves the
-  histogram-building work), and a persistent worker pool to cut per-node
-  goroutine spawns.
+- **Depth-first, exact histograms with subtraction.** O(n·d·depth) per tree,
+  halved per level by parent−sibling subtraction. Fine for in-memory corpora; a
+  persistent worker pool (to cut per-node goroutine spawns) is the next lever.
 - **`float64` throughout.** Accuracy and simplicity over the memory/speed of
   `float32`.
 - **No missing-value handling.** Features are assumed present (the inbox matrix

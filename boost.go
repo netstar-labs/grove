@@ -111,6 +111,8 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 		}
 	}
 
+	ar := newArena(bnr.edges) // node-histogram buffer pool, shared across all trees
+
 	bestRound, bestLoss, since := -1, math.Inf(1), 0
 	for round := 0; round < p.Rounds; round++ {
 		trees := make([]tree, k)
@@ -124,7 +126,7 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 					g[i], h[i] = gradHess(sigmoid(raw[i][0]), y[i])
 				}
 			}
-			t := buildTree(bt, bnr.edges, g, h, sample(), tp)
+			t := buildTree(bt, bnr.edges, g, h, sample(), tp, ar)
 			for i := range raw {
 				raw[i][0] += t.predict(X[i])
 			}
@@ -142,7 +144,7 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 				}
 			}
 			for c := 0; c < k; c++ {
-				t := buildTree(bt, bnr.edges, gc[c], hc[c], sample(), tp)
+				t := buildTree(bt, bnr.edges, gc[c], hc[c], sample(), tp, ar)
 				for i := range raw {
 					raw[i][c] += t.predict(X[i])
 				}
