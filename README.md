@@ -69,4 +69,4 @@ grove eval    -model model.json -in data.csv -target type
 
 ## License
 
-GPL-3.0 — see [LICENSE](LICENSE).
+Licensed under the Apache License, Version 2.0 — see [LICENSE](LICENSE).
