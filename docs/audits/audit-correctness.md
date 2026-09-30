@@ -113,6 +113,22 @@ determinism. Verified via `TestGoldenPredictions`, unchanged before/after.
   space than `predIdx`) keeps the original search, since substituting the
   index there would silently change behavior rather than just remove
   redundant work.
+
+  **Correction, found by the final whole-diff skeptic**: the first version of
+  this fix's gate ("common case where `classes == m.Classes`") was itself
+  wrong — `classes == m.Classes` does not imply `predIdx` is a valid index
+  into it. Nothing enforces `len(m.Classes) == m.NumClass` anywhere in the
+  codebase (`pkg/serve.Train` sets `m.Classes = req.Classes` with no length
+  check), so a model trained over the network with a short `Classes` list
+  loads and predicts fine, but this "optimization" would panic the moment a
+  row predicted a class index past the end of the stored names — reproduced
+  live (train→save→eval, panic at current HEAD vs. no panic at the pre-pass
+  commit, confirming the regression was introduced here). Fixed by falling
+  back to the search whenever `predIdx` would be out of range, not just in
+  the already-handled "unnamed" branch — mirrors the bounds guard
+  `pkg/serve.Predict` already has for the identical reason. Regression test
+  added (`TestEvalHandlesShortClassesList`), sabotage-verified against the
+  exact panic. See the `fix:` commit following this pass's `cc6a06d`.
 - **`pkg/serve`'s `path()` had a `name == ""` clause fully subsumed by
   `name != filepath.Base(name)`** (`filepath.Base("") == "."` always, verified
   directly with a throwaway Go program, not assumed from documentation).

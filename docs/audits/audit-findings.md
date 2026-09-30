@@ -82,5 +82,23 @@ sabotage-verified regression test (revert → confirm an attributable failure
 reproductions of the underlying vulnerability (an OS-killed runaway process
 for NumClass/Rounds; a real crash for the MCP panic-recovery removal).
 
+## Final whole-diff skeptic — caught a regression this pass introduced
+
+Before this pass was called done, an independent skeptic reviewed the entire
+diff fresh (not re-trusting the earlier per-finding skeptics) and found that
+the `eval()` fix in `cc6a06d` (above) had itself introduced a real panic: its
+gating condition assumed `classes == m.Classes` implies `predIdx` is always a
+valid index into it, which nothing in the codebase actually guarantees.
+Reproduced live (A/B against the pre-pass commit), fixed, sabotage-verified —
+see `audit-correctness.md`'s correction note and the `fix:` commit below.
+Everything else the skeptic independently re-verified (the security fixes,
+the golden-prediction determinism, the dedup, the fuzz targets) held up.
+
+This is the reason the final skeptic step exists: a pass's own confidence in
+its fixes isn't the same as those fixes being correct, and a "verify with a
+skeptic" step that only re-confirms what earlier skeptics already believed
+would have missed this.
+
 Commits: `510b6c2` (security), `cc6a06d` (dedup/simplify/correctness),
-`5eeb0b5` (docs).
+`5eeb0b5` (docs), `ae42822` (audit docs), `98571db` (fuzz targets), `b6b5d14`
+(L1/L2 summary), `27b254a` (fix: the eval() regression above).
