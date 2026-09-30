@@ -162,7 +162,7 @@ func softmax(raw, out []float64) {
 	}
 }
 
-func clamp(v, lo, hi float64) float64 { return max(lo, min(hi, v)) }
+func clamp[T int | float64](v, lo, hi T) T { return max(lo, min(hi, v)) }
 
 func iota0(n int) []int {
 	s := make([]int, n)

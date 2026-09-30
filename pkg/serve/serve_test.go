@@ -106,4 +106,10 @@ func TestConnectorErrors(t *testing.T) {
 	if _, err := New(t.TempDir()).path("../../etc/passwd"); err == nil {
 		t.Error("path traversal name should be rejected")
 	}
+	// an invalid name (fails path()'s own validation, never touches disk) is
+	// a bad request, distinct from a valid name with no file behind it (404
+	// above) — the two used to be conflated into a single 404.
+	if w, _ := hreq(t, h, "POST", "/load?name=..%2F..%2Fetc%2Fpasswd", nil); w.Code != http.StatusBadRequest {
+		t.Errorf("load-invalid-name code = %d, want 400", w.Code)
+	}
 }

@@ -94,12 +94,7 @@ func features(row []string, cols []int) ([]float64, error) {
 }
 
 func loadModel(path string) (*grove.Model, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return grove.Load(f)
+	return grove.LoadFile(path)
 }
 
 // loadModelAndRows is the shared predict/eval prelude: open the model, read the

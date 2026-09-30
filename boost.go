@@ -55,16 +55,17 @@ func Fit(X [][]float64, y []float64, p Params) (*Model, error) {
 	trainIdx := iota0(n)
 	var valIdx []int
 	if p.EarlyStop > 0 && p.ValFraction > 0 && n >= 4 {
-		sp := iota0(n)
 		sr := rand.New(rand.NewSource(p.Seed ^ 0x9e3779b9))
-		sr.Shuffle(n, func(i, j int) { sp[i], sp[j] = sp[j], sp[i] })
-		nv := clampInt(int(p.ValFraction*float64(n)), 1, n-1)
-		valIdx, trainIdx = sp[:nv], sp[nv:]
+		sr.Shuffle(n, func(i, j int) { trainIdx[i], trainIdx[j] = trainIdx[j], trainIdx[i] })
+		nv := clamp(int(p.ValFraction*float64(n)), 1, n-1)
+		valIdx, trainIdx = trainIdx[:nv], trainIdx[nv:]
 	}
 
-	base := baseScores(y, trainIdx, k)
+	var base []float64
 	if p.Objective == Regression {
 		base = []float64{meanIdx(y, trainIdx)} // start from the training-target mean
+	} else {
+		base = baseScores(y, trainIdx, k)
 	}
 
 	// raw[i] holds the running per-class score for sample i (init to base).
@@ -210,8 +211,6 @@ func valLoss(raw [][]float64, y []float64, idx []int, k int, objective string) f
 	}
 	return s / float64(len(idx))
 }
-
-func clampInt(n, lo, hi int) int { return max(lo, min(hi, n)) }
 
 // baseScores returns the initial per-class raw score (the constant model) over
 // the training rows idx: the label log-odds for Binary, per-class log-frequency

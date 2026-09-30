@@ -171,20 +171,35 @@ func (b *builder) grow(idx []int, depth int, hg, hh []float64) int {
 	// missing samples sit in the bin past bestBin, so route them by the split's
 	// learned default direction — matching predict — rather than always right.
 	missBin := len(b.edges[bestF]) + 1
-	left := make([]int, 0, len(idx))
-	right := make([]int, 0, len(idx))
-	for _, i := range idx {
+	goesLeft := func(i int) bool {
 		bin := int(b.bt[bestF][i])
-		goLeft := bin <= bestBin
 		if bin == missBin {
-			goLeft = defaultLeft
+			return defaultLeft
 		}
-		if goLeft {
-			left = append(left, i)
-		} else {
-			right = append(right, i)
+		return bin <= bestBin
+	}
+	// One allocation, not two: count the split first, then fill a single
+	// buffer from both ends, each side keeping its original relative order
+	// (required — buildHist's accumulation is float summation, not order-
+	// independent, and a seeded fit must stay bit-for-bit reproducible).
+	nLeft := 0
+	for _, i := range idx {
+		if goesLeft(i) {
+			nLeft++
 		}
 	}
+	buf := make([]int, len(idx))
+	li, ri := 0, nLeft
+	for _, i := range idx {
+		if goesLeft(i) {
+			buf[li] = i
+			li++
+		} else {
+			buf[ri] = i
+			ri++
+		}
+	}
+	left, right := buf[:nLeft], buf[nLeft:]
 
 	// build only the smaller child's histogram; derive the larger by subtracting
 	// it from the parent's (shg/shh hold the smaller, lhg/lhh the larger).

@@ -178,12 +178,7 @@ func train(args []string) error {
 	m.FeatureNames = featNames
 	m.Classes = classes
 
-	f, err := os.Create(*out)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if err := m.Save(f); err != nil {
+	if err := m.SaveFile(*out); err != nil {
 		return err
 	}
 	fmt.Printf("trained %s model: %d rows, %d features, %d classes %v, %d trees -> %s\n",
@@ -234,7 +229,9 @@ func predict(args []string) error {
 
 	w := csv.NewWriter(os.Stdout)
 	defer w.Flush()
-	w.Write([]string{"source", "predicted", "probability"})
+	if err := w.Write([]string{"source", "predicted", "probability"}); err != nil {
+		return err
+	}
 	for _, r := range rows {
 		x, err := features(r, cols)
 		if err != nil {
@@ -245,7 +242,9 @@ func predict(args []string) error {
 		if srcCol >= 0 {
 			src = r[srcCol]
 		}
-		w.Write([]string{src, className(m, cls), strconv.FormatFloat(p, 'f', 4, 64)})
+		if err := w.Write([]string{src, className(m, cls), strconv.FormatFloat(p, 'f', 4, 64)}); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -273,8 +272,9 @@ func eval(args []string) error {
 		return fmt.Errorf("target column %q not found", *target)
 	}
 
+	named := len(m.Classes) > 0
 	classes := m.Classes
-	if len(classes) == 0 { // a model loaded without stored class names
+	if !named { // a model loaded without stored class names
 		classes = distinctSorted(rows, tCol)
 	}
 
@@ -298,8 +298,18 @@ func eval(args []string) error {
 		confusion[actual+"→"+predName]++
 		if aIdx >= 0 {
 			support[aIdx]++
-			logloss += -math.Log(clampProb(probOfClass(m, m.Predict(x), aIdx)))
-			pIdx := slices.Index(classes, predName)
+			logloss += -math.Log(clampProb(m.ProbOf(m.Predict(x), aIdx)))
+			// When classes is m.Classes (the normal case), predName was
+			// produced from classes[predIdx], so the index is already in
+			// hand — re-deriving it by searching for predName back in
+			// classes is a redundant O(nC) search. Only in the fallback
+			// branch (classes rebuilt from the data's own label order) do
+			// predIdx and a classes-index genuinely differ, so the search
+			// is still needed there.
+			pIdx := predIdx
+			if !named {
+				pIdx = slices.Index(classes, predName)
+			}
 			if pIdx == aIdx {
 				tp[aIdx]++
 			} else {
@@ -334,21 +344,6 @@ func eval(args []string) error {
 		fmt.Printf("  %-28s %d\n", k, confusion[k])
 	}
 	return nil
-}
-
-// probOfClass returns the model's probability for a given class index, handling
-// the Binary shape (Predict returns just P(class=1)).
-func probOfClass(m *grove.Model, dist []float64, idx int) float64 {
-	if m.NumClass == 1 {
-		if idx == 1 {
-			return dist[0]
-		}
-		return 1 - dist[0]
-	}
-	if idx >= 0 && idx < len(dist) {
-		return dist[idx]
-	}
-	return 0
 }
 
 func clampProb(p float64) float64 { return max(1e-15, min(1, p)) }

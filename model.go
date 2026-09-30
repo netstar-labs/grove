@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 )
 
 // modelVersion is the on-disk model schema version. Load rejects anything newer
@@ -126,6 +127,37 @@ func argmax(s []float64) int {
 	return best
 }
 
+// ClassOf returns the predicted class index for a distribution already
+// returned by Predict — thresholds at 0.5 for Binary's compact 1-element
+// shape (P(class=1)), argmax otherwise. Callers that already hold a computed
+// dist should use this rather than a second call to PredictClass, which
+// would walk the ensemble again.
+func (m *Model) ClassOf(dist []float64) int {
+	if m.NumClass == 1 {
+		if dist[0] >= 0.5 {
+			return 1
+		}
+		return 0
+	}
+	return argmax(dist)
+}
+
+// ProbOf returns dist's probability for class idx, handling Binary's compact
+// 1-element shape (P(class=1)) as well as the full per-class case. dist must
+// already be a distribution from Predict.
+func (m *Model) ProbOf(dist []float64, idx int) float64 {
+	if m.NumClass == 1 {
+		if idx == 1 {
+			return dist[0]
+		}
+		return 1 - dist[0]
+	}
+	if idx >= 0 && idx < len(dist) {
+		return dist[idx]
+	}
+	return 0
+}
+
 // PredictBatch returns the probability vector for each row of X.
 func (m *Model) PredictBatch(X [][]float64) [][]float64 {
 	out := make([][]float64, len(X))
@@ -183,6 +215,28 @@ func (m *Model) Save(w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", " ")
 	return enc.Encode(m)
+}
+
+// SaveFile writes m to path (created/truncated), the file-based counterpart
+// to Save for callers that don't already hold an io.Writer.
+func (m *Model) SaveFile(path string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return m.Save(f)
+}
+
+// LoadFile opens path and reads a model saved by Save/SaveFile, the
+// file-based counterpart to Load.
+func LoadFile(path string) (*Model, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return Load(f)
 }
 
 // Load reads and validates a model written by Save. A structurally unsound

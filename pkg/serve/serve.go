@@ -87,9 +87,7 @@ func (s *Server) Train(req TrainRequest) (TrainResponse, error) {
 	m.FeatureNames = req.FeatureNames
 	m.Classes = req.Classes
 
-	s.mu.Lock()
-	s.model = m
-	s.mu.Unlock()
+	s.setModel(m)
 
 	resp := TrainResponse{
 		Objective: m.Objective, NumClass: m.NumClass, Trees: m.TreeCount(),
@@ -127,18 +125,7 @@ func (s *Server) Predict(req PredictRequest) (PredictResponse, error) {
 	for i, x := range req.Features {
 		dist := m.Predict(x) // one ensemble pass; derive the class from it
 		resp.Probabilities[i] = dist
-		c := 0
-		if m.NumClass == 1 {
-			if dist[0] >= 0.5 {
-				c = 1
-			}
-		} else {
-			for k := 1; k < len(dist); k++ {
-				if dist[k] > dist[c] {
-					c = k
-				}
-			}
-		}
+		c := m.ClassOf(dist)
 		resp.Classes[i] = c
 		if named && c < len(m.Classes) {
 			resp.Labels[i] = m.Classes[c]
@@ -162,18 +149,11 @@ func (s *Server) Load(name string) (ModelInfo, error) {
 	if err != nil {
 		return ModelInfo{}, err
 	}
-	f, err := os.Open(path)
+	m, err := grove.LoadFile(path)
 	if err != nil {
 		return ModelInfo{}, err
 	}
-	defer f.Close()
-	m, err := grove.Load(f)
-	if err != nil {
-		return ModelInfo{}, err
-	}
-	s.mu.Lock()
-	s.model = m
-	s.mu.Unlock()
+	s.setModel(m)
 	return info(m), nil
 }
 
@@ -190,6 +170,12 @@ func (s *Server) current() *grove.Model {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.model
+}
+
+func (s *Server) setModel(m *grove.Model) {
+	s.mu.Lock()
+	s.model = m
+	s.mu.Unlock()
 }
 
 func info(m *grove.Model) ModelInfo {
@@ -209,18 +195,13 @@ func (s *Server) persist(name string, m *grove.Model) error {
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return err
 	}
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return m.Save(f)
+	return m.SaveFile(path)
 }
 
 // path resolves a model name to a file under dir, rejecting anything that isn't
 // a plain base name (no separators, no traversal).
 func (s *Server) path(name string) (string, error) {
-	if name == "" || name != filepath.Base(name) || name == "." || name == ".." {
+	if name != filepath.Base(name) || name == "." || name == ".." {
 		return "", fmt.Errorf("serve: invalid model name %q", name)
 	}
 	for _, r := range name {
@@ -279,7 +260,13 @@ func (s *Server) hSave(w http.ResponseWriter, r *http.Request) {
 func (s *Server) hLoad(w http.ResponseWriter, r *http.Request) {
 	mi, err := s.Load(r.URL.Query().Get("name"))
 	if err != nil {
-		writeErr(w, http.StatusNotFound, err)
+		// A malformed name (path() rejects it before ever touching disk) is a
+		// bad request; only a genuinely missing file is "not found."
+		code := http.StatusBadRequest
+		if errors.Is(err, os.ErrNotExist) {
+			code = http.StatusNotFound
+		}
+		writeErr(w, code, err)
 		return
 	}
 	writeJSON(w, mi)
