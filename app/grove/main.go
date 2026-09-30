@@ -299,15 +299,19 @@ func eval(args []string) error {
 		if aIdx >= 0 {
 			support[aIdx]++
 			logloss += -math.Log(clampProb(m.ProbOf(m.Predict(x), aIdx)))
-			// When classes is m.Classes (the normal case), predName was
-			// produced from classes[predIdx], so the index is already in
-			// hand — re-deriving it by searching for predName back in
-			// classes is a redundant O(nC) search. Only in the fallback
-			// branch (classes rebuilt from the data's own label order) do
-			// predIdx and a classes-index genuinely differ, so the search
-			// is still needed there.
+			// When classes is m.Classes (the normal case) AND predIdx is
+			// actually in range for it, predName was produced from
+			// classes[predIdx], so the index is already in hand — re-deriving
+			// it by searching for predName back in classes is a redundant
+			// O(nC) search. Nothing enforces len(m.Classes) == m.NumClass
+			// though (a model can be trained/loaded with fewer stored class
+			// names than classes), so predIdx isn't always a valid index into
+			// classes even when named — fall back to the search (which
+			// correctly reports "not found" via -1) rather than index out of
+			// bounds. The fallback branch (classes rebuilt from the data's
+			// own label order) always needs the search regardless.
 			pIdx := predIdx
-			if !named {
+			if !named || pIdx >= nC {
 				pIdx = slices.Index(classes, predName)
 			}
 			if pIdx == aIdx {
