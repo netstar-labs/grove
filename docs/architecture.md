@@ -25,8 +25,11 @@ y []float64 ──────────────────────�
 
 ## Binning (`bins.go`)
 
-Continuous features are mapped to at most `MaxBins` (≤255, leaving a `uint8` slot
-for the missing bin) ordinal bins via **quantile edges** — for a high-cardinality column, split
+Continuous features are mapped to at most `MaxBins` (≤255) ordinal bins via
+**quantile edges**, plus one additional bin for missing values (`MaxBins` is
+capped at 255 so that ≤255 regular + 1 missing still fits a `uint8` index, not
+because the missing bin is carved out of the `MaxBins` count itself) — for a
+high-cardinality column, split
 points chosen so each bin holds a roughly equal share of the data; a column with
 fewer than `MaxBins` distinct values simply gets one bin per value. A constant
 column collapses to one bin. Bins
@@ -69,7 +72,8 @@ seeded with a constant base (label log-odds for binary; per-class log-frequency
 for multiclass; the target mean for regression). Each round computes the loss
 gradient/hessian at the current `raw`, fits one tree per class to those
 gradients, and adds the tree's (shrunk) output back into `raw`. Logistic loss
-gives `g = p − y`, `h = p(1−p)`; softmax gives the per-class analogue; regression
+gives `g = p − y`, `h = max(p(1−p), 1e-6)` (the floor keeps the hessian off zero
+at the p≈0/1 extremes); softmax gives the per-class analogue; regression
 (squared error) gives `g = pred − y`, `h = 1`. Optional row `Subsample` (seeded) adds stochastic
 regularization. The whole loop is deterministic for a fixed `Seed`.
 
@@ -100,11 +104,13 @@ smaller additional win on top.
   persistent worker pool (to cut per-node goroutine spawns) is the next lever.
 - **`float64` throughout.** Accuracy and simplicity over the memory/speed of
   `float32`.
-- **Missing values (NaN)** get their own bin per feature and a learned default
-  direction per split (the side that maximized gain during training), so a
-  missing feature at predict time routes deterministically. Bins are capped at
-  255 to reserve the missing slot within a `uint8`. Clean data is unaffected —
-  the missing bin is empty, so splits are identical to having no missing bin.
+- **Missing values (NaN)** get their own bin per feature, additional to the
+  regular quantile bins, and a learned default direction per split (the side
+  that maximized gain during training), so a missing feature at predict time
+  routes deterministically. `MaxBins` is capped at 255 so the regular bins plus
+  the one missing bin (≤256 total) still fit within a `uint8` index. Clean data
+  is unaffected — the missing bin is empty, so splits are identical to having
+  no missing bin.
 - **Single-machine, in-memory.** No distribution, no out-of-core. Deliberate: the
   target is inline scoring and modest corpora, not leaderboard scale.
 

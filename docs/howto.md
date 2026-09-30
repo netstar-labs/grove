@@ -2,8 +2,10 @@
 
 A tour of every path: the library (binary, multiclass, regression, importance,
 save/load, batch, missing values, early stopping), the CLI over CSV, and the
-HTTP / unix / MCP connectors. Every snippet runs; build standalone with
-`GOWORK=off`.
+HTTP / unix / MCP connectors. Every CLI/curl snippet runs as shown; the
+library snippets are illustrative fragments (`X`, `y`, `x` aren't defined
+inline) — see `example/` for complete, runnable versions. Build standalone
+with `GOWORK=off`.
 
 ## 1. Library — binary classification
 

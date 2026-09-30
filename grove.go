@@ -44,7 +44,7 @@ type Params struct {
 	Rounds         int     // boosting rounds (trees for Binary, Rounds×NumClass total)
 	LearningRate   float64 // shrinkage applied to each tree's leaves
 	MaxDepth       int     // maximum tree depth
-	MaxBins        int     // histogram bins per feature (2..255; a slot is reserved for missing values)
+	MaxBins        int     // regular histogram bins per feature (2..255); one additional bin (beyond MaxBins) always holds missing values
 	Lambda         float64 // L2 regularization on leaf weights (0 uses the default; negative = none)
 	Gamma          float64 // minimum gain to make a split
 	MinChildWeight float64 // minimum summed hessian in a child
@@ -62,7 +62,7 @@ func Default(objective string, numClass int) Params {
 		Rounds:         100,
 		LearningRate:   0.1,
 		MaxDepth:       6,
-		MaxBins:        255, // one bin reserved for missing values (fits uint8)
+		MaxBins:        255, // capped so +1 missing bin still fits a uint8 index
 		Lambda:         1,
 		Gamma:          0,
 		MinChildWeight: 1,
@@ -102,7 +102,7 @@ func (p *Params) fill() error {
 		p.MaxBins = d.MaxBins
 	}
 	if p.MaxBins > 255 {
-		p.MaxBins = 255 // reserve bin index for missing values within uint8
+		p.MaxBins = 255 // 255 regular + 1 missing bin = 256, the full uint8 index range
 	}
 	// A zero Lambda takes the default like the other knobs; pass a negative
 	// value (clamped to 0) when you want literally no L2 regularization.

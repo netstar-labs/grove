@@ -31,7 +31,7 @@ m2, _ := grove.Load(r)
 | `Rounds` | 100 | boosting rounds (Binary: 1 tree/round; Multiclass: `NumClass`/round) |
 | `LearningRate` | 0.1 | shrinkage per tree |
 | `MaxDepth` | 6 | max tree depth |
-| `MaxBins` | 255 | histogram bins per feature (2..255; a `uint8` slot is reserved for missing values) |
+| `MaxBins` | 255 | regular histogram bins per feature (2..255); one additional bin (beyond `MaxBins`) always holds missing values — the 255 cap keeps regular+missing within a `uint8` index |
 | `Lambda` | 1 | L2 regularization on leaf weights (0 → the default 1; pass a negative value for none) |
 | `Gamma` | 0 | minimum gain to split |
 | `MinChildWeight` | 1 | minimum summed hessian in a child |
