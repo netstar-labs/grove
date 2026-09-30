@@ -178,6 +178,16 @@ func TestFitErrors(t *testing.T) {
 	if _, err := Fit([][]float64{{1}}, []float64{5}, Params{Objective: Multiclass, NumClass: 3}); err == nil {
 		t.Error("label out of class range should error")
 	}
+	// An attacker-controlled NumClass/Rounds (e.g. over a served Train
+	// endpoint) must be rejected before it drives any O(NumClass) or
+	// O(Rounds*NumClass) allocation/loop — not merely accepted and left to
+	// exhaust memory or CPU.
+	if _, err := Fit([][]float64{{1}}, []float64{0}, Params{Objective: Multiclass, NumClass: 2_000_000_000}); err == nil {
+		t.Error("absurd NumClass should error, not attempt to allocate")
+	}
+	if _, err := Fit([][]float64{{1}}, []float64{0, 1}, Params{Objective: Binary, Rounds: 2_000_000_000}); err == nil {
+		t.Error("absurd Rounds should error, not run unbounded")
+	}
 }
 
 func TestEarlyStopping(t *testing.T) {

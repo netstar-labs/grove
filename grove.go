@@ -25,6 +25,17 @@ const (
 	Regression = "regression" // squared-error loss over continuous targets
 )
 
+// maxNumClass and maxRounds cap two fields that size allocations and loop
+// bounds directly (NumClass drives several O(NumClass) and O(Rounds*NumClass)
+// allocations in Fit; Rounds has no cancellation hook, so nothing else stops
+// an absurd value from running to completion). Both are generous ceilings for
+// any real GBDT problem — chosen to guard the untrusted-input path (a served
+// model's Train/grove_train request) without constraining legitimate use.
+const (
+	maxNumClass = 10_000
+	maxRounds   = 1_000_000
+)
+
 // Params configures a fit. The zero value is not valid; use Default and adjust,
 // or rely on Fit filling unset (zero) fields with the defaults below.
 type Params struct {
@@ -71,9 +82,15 @@ func (p *Params) fill() error {
 	if p.Objective == Multiclass && p.NumClass < 2 {
 		return errors.New("grove: multiclass requires NumClass >= 2")
 	}
+	if p.Objective == Multiclass && p.NumClass > maxNumClass {
+		return errors.New("grove: NumClass exceeds the maximum of 10000")
+	}
 	d := Default(p.Objective, p.NumClass)
 	if p.Rounds <= 0 {
 		p.Rounds = d.Rounds
+	}
+	if p.Rounds > maxRounds {
+		return errors.New("grove: Rounds exceeds the maximum of 1000000")
 	}
 	if p.LearningRate <= 0 {
 		p.LearningRate = d.LearningRate

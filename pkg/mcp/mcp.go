@@ -52,7 +52,7 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 			}
 			return err
 		}
-		resp, notification := s.handle(&req)
+		resp, notification := withRecover(req.ID, func() (rpcResp, bool) { return s.handle(&req) })
 		if notification {
 			continue // notifications carry no id and get no response
 		}
@@ -60,6 +60,22 @@ func (s *Server) Serve(in io.Reader, out io.Writer) error {
 			return err
 		}
 	}
+}
+
+// withRecover turns a panic during fn into a JSON-RPC internal-error response
+// instead of letting it unwind out of Serve's loop and kill the whole
+// process. net/http gives the HTTP transport this containment for free
+// (net/http.(*conn).serve recovers per-connection, so one bad request never
+// takes down the others); this stdio server has no equivalent unless it does
+// it itself — without it, the exact same triggering bug is strictly worse
+// here than over HTTP: the whole session dies instead of one call failing.
+func withRecover(id json.RawMessage, fn func() (rpcResp, bool)) (resp rpcResp, notification bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			resp, notification = fail(id, -32603, fmt.Sprintf("internal error: %v", r)), false
+		}
+	}()
+	return fn()
 }
 
 func (s *Server) handle(req *rpcReq) (rpcResp, bool) {
@@ -100,16 +116,25 @@ func (s *Server) callTool(req *rpcReq) rpcResp {
 	case "grove_predict":
 		payload, err = bind(call.Arguments, s.core.Predict)
 	case "grove_load":
-		payload, err = bind(call.Arguments, s.core.Load)
-	case "grove_save":
-		var a struct {
+		// s.core.Load takes a bare string, but the tool's own schema (below)
+		// advertises an object {"name": "..."} — bind unmarshals Arguments
+		// straight into Req, so binding the method directly would try to
+		// unmarshal that object into a string and fail on every call. Route
+		// through the same object-shaped Req grove_save uses.
+		payload, err = bind(call.Arguments, func(a struct {
 			Name string `json:"name"`
-		}
-		if err = json.Unmarshal(call.Arguments, &a); err == nil {
-			if err = s.core.Save(a.Name); err == nil {
-				payload = map[string]string{"saved": a.Name}
+		}) (serve.ModelInfo, error) {
+			return s.core.Load(a.Name)
+		})
+	case "grove_save":
+		payload, err = bind(call.Arguments, func(a struct {
+			Name string `json:"name"`
+		}) (map[string]string, error) {
+			if err := s.core.Save(a.Name); err != nil {
+				return nil, err
 			}
-		}
+			return map[string]string{"saved": a.Name}, nil
+		})
 	case "grove_model_info":
 		payload, err = s.core.Info()
 	default:
